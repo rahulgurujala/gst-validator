@@ -22,6 +22,28 @@
 
 ---
 
+> [!IMPORTANT]
+> **Unofficial, and published for educational and experimental use.**
+>
+> This project is not affiliated with, endorsed by, or supported by the Goods
+> and Services Tax Network (GSTN), the Government of India, or any tax
+> authority. It talks to undocumented endpoints of the public GST portal,
+> which may change, rate-limit, or stop responding at any time, and it makes
+> no claim that its results are complete, current, or correct.
+>
+> Do not treat its output as an authoritative record. Verify anything that
+> matters against the official portal before relying on it for compliance,
+> invoicing, onboarding, or any other legal or financial decision.
+>
+> You are responsible for how you use it, including compliance with the
+> portal's terms of use, applicable law, and data-protection obligations for
+> any taxpayer data you retrieve. The software is provided "as is", without
+> warranty of any kind, and the authors accept no liability for any claim,
+> damage, or loss arising from its use. See [LICENSE](LICENSE).
+>
+> For unattended or high-volume access, use the official
+> [GST API](https://developer.gst.gov.in/) through a licensed GSP.
+
 A typed Python library and CLI for the Indian GST taxpayer search. It checks a
 GSTIN's structure and checksum without touching the network, and wraps the
 portal's undocumented endpoints in objects you can actually hold.
