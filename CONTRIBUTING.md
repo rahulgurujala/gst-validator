@@ -21,6 +21,7 @@ create a virtualenv yourself. Python 3.13+ is required.
 Run what CI runs:
 
 ```bash
+uv lock --check              # the lockfile matches pyproject.toml
 uv run ruff check .          # lint
 uv run ruff format .         # format
 uv run mypy                  # strict type check
@@ -28,7 +29,15 @@ uv run pyright               # strict type check, second opinion
 uv run pytest -q             # tests
 ```
 
-All five must pass. CI runs the same commands on every push and pull request.
+All of these must pass. CI runs the same commands on every push and pull
+request, and installs with `uv sync --locked` so a stale lockfile fails there
+rather than silently resolving to something else.
+
+If you change dependencies, run `uv lock` and commit `uv.lock` with the
+change. You do not need to touch it for a release: the release workflow
+refreshes it on the release pull request, because release-please bumps this
+project's version in `pyproject.toml` but does not know that `uv.lock` records
+that version too.
 
 ## House rules
 

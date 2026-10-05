@@ -22,12 +22,46 @@ jobs:
     outputs:
       released: ${{ steps.release.outputs.release_created }}
       tag: ${{ steps.release.outputs.tag_name }}
+      pr: ${{ steps.release.outputs.pr }}
     steps:
       - uses: googleapis/release-please-action@v5
         id: release
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  # release-please bumps pyproject.toml and __version__, but knows nothing
+  # about uv.lock, which records this project's own version too. Without this
+  # the release PR would merge a lockfile one version behind and every
+  # `uv sync --locked` against main would fail.
+  lockfile:
+    needs: release-please
+    if: needs.release-please.outputs.pr != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ fromJSON(needs.release-please.outputs.pr).headBranchName }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.2.0
+
+      - name: Refresh the lockfile for the new version
+        run: uv lock
+
+      - name: Commit it to the release pull request
+        run: |
+          if [ -z "$(git status --porcelain uv.lock)" ]; then
+            echo "lockfile already current"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add uv.lock
+          git commit -m "chore: refresh uv.lock for the release"
+          git push
 
   build:
     needs: release-please
@@ -54,7 +88,8 @@ jobs:
 
       - name: Test before publishing
         run: |
-          uv sync --all-extras --dev
+          uv lock --check
+          uv sync --locked --all-extras --dev
           uv run ruff check .
           uv run mypy
           uv run pytest -q

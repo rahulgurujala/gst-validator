@@ -21,8 +21,11 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Check the lockfile is current
+        run: uv lock --check
+
       - name: Install the project
-        run: uv sync --all-extras --dev
+        run: uv sync --locked --all-extras --dev
 
       - name: Lint
         run: uv run ruff check .
