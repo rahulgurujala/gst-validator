@@ -14,6 +14,7 @@ from typing import Any, cast
 
 from rich.console import Console
 from rich.table import Table
+from rich.text import Text
 from rich.theme import Theme
 
 from .client import GSTClient
@@ -33,6 +34,11 @@ _THEME = Theme(
     }
 )
 
+# Portal responses and argv are data, never rich markup: a name or an address
+# holding "[/]" would otherwise raise MarkupError and take the CLI down, so
+# every dynamic string below is wrapped in Text rather than interpolated into
+# a markup string.
+#
 # `out` carries results, `err` carries progress and failures, so that a
 # redirected stdout holds nothing but the answer.
 out = Console(theme=_THEME, highlight=False)
@@ -125,7 +131,7 @@ def _profile_table(profile: TaxpayerProfile) -> Table:
     """Two-column table of everything the portal returned, empties dropped."""
     heading = profile.name or profile.gstin
     table = Table(
-        title=f"[gstin]{profile.gstin}[/]  {heading}",
+        title=Text.assemble((profile.gstin, "gstin"), "  ", heading),
         title_justify="left",
         show_header=False,
         box=None,
@@ -146,9 +152,8 @@ def _profile_table(profile: TaxpayerProfile) -> Table:
         if key == "is_active" or value in (None, [], "", {}):
             continue
         rendered = overrides.get(key) or _format(value)
-        if key == "status":
-            rendered = f"[{_status_style(profile)}]{rendered}[/]"
-        table.add_row(key.replace("_", " "), rendered)
+        style = _status_style(profile) if key == "status" else ""
+        table.add_row(key.replace("_", " "), Text(rendered, style=style))
     return table
 
 
@@ -159,7 +164,7 @@ def _offline_table(gstin: GSTIN) -> Table:
     for key, value in _offline_fields(gstin).items():
         if key in ("gstin", "valid") or value is None:
             continue
-        table.add_row(key.replace("_", " "), str(value))
+        table.add_row(key.replace("_", " "), Text(str(value)))
     return table
 
 
@@ -177,8 +182,10 @@ def _lookup(client: GSTClient, gstin: GSTIN, args: argparse.Namespace) -> Taxpay
                 args.captcha_path or Path(tempfile.gettempdir()) / f"{gstin}-captcha.png"
             )
             captcha.save(written)
-            err.print(f"[label]captcha image written to[/] [accent]{written}[/]")
-        err.print("[accent]captcha text:[/] ", end="")
+            err.print(
+                Text.assemble(("captcha image written to ", "label"), (str(written), "accent"))
+            )
+        err.print(Text("captcha text: ", style="accent"), end="")
         solved = input()
         if args.details_only:
             return TaxpayerProfile(details=client.fetch_details(gstin, solved, refresh=True))
@@ -197,14 +204,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         gstin = GSTIN.parse(args.gstin)
     except GSTValidatorError as error:
-        err.print(f"[err]invalid:[/] {error}")
+        err.print(Text.assemble(("invalid: ", "err"), str(error)))
         return 2
 
     if args.offline:
         if args.as_json:
             print(json.dumps(_offline_fields(gstin), indent=2))
         else:
-            out.print(f"[ok]valid[/] [gstin]{gstin}[/]")
+            out.print(Text.assemble(("valid ", "ok"), (gstin.value, "gstin")))
             out.print(_offline_table(gstin))
         return 0
 
@@ -230,7 +237,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             out.print(_profile_table(profile))
     except GSTValidatorError as error:
-        err.print(f"[err]lookup failed:[/] {error}")
+        err.print(Text.assemble(("lookup failed: ", "err"), str(error)))
         return 1
     except (EOFError, KeyboardInterrupt):
         err.print("[warn]aborted[/]")

@@ -656,3 +656,41 @@ class TestRichOutput:
         captured = capsys.readouterr()
         assert captured.out == ""
         assert "invalid GSTIN" in captured.err
+
+
+class TestMarkupSafety:
+    """Portal responses and argv are data, never rich markup."""
+
+    def test_square_brackets_in_an_argument_do_not_crash(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """`[/]` is a closing tag to rich: interpolating it raises MarkupError."""
+        assert main(["[/]", "--offline"]) == 2
+        assert "invalid GSTIN" in capsys.readouterr().err
+
+    def test_markup_in_portal_data_is_shown_literally(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        hostile = dict(PAYLOAD)
+        hostile["lgnm"] = "ACME [/] [bold red]INJECTED[/] TRADERS"
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            match request.url.path:
+                case "/services/searchtp":
+                    return httpx.Response(200, text="<html></html>")
+                case "/services/captcha":
+                    return httpx.Response(
+                        200, content=b"\x89PNG", headers={"content-type": "image/png"}
+                    )
+                case "/services/api/search/taxpayerDetails":
+                    return httpx.Response(200, json=hostile)
+                case _:
+                    return httpx.Response(200, json={"status": 1, "data": []})
+
+        monkeypatch.setattr(
+            "gst_validator.cli.GSTClient", lambda: _FakeClient(httpx.MockTransport(handler))
+        )
+        monkeypatch.setattr("builtins.input", _answer("1a2b3"))
+        assert main([VALID_GSTIN, "--no-color"]) == 0
+        stdout = capsys.readouterr().out
+        assert "[bold red]INJECTED[/]" in stdout  # printed, not interpreted
