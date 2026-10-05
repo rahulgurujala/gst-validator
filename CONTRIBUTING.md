@@ -1,7 +1,8 @@
 # Contributing
 
 Thanks for taking the time. Bug reports, portal-shape fixes and docs
-improvements are all welcome.
+improvements are all welcome. Taking part means following the
+[Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Getting set up
 
@@ -39,6 +40,9 @@ All five must pass. CI runs the same commands on every push and pull request.
   someone's name, address or GSTIN to this repo.
 - **Keep it typed.** Both type checkers run in strict mode. Public functions
   are annotated; `Any` only at the JSON boundary, narrowed immediately.
+- **Machine output stays plain.** The human table is rendered with rich, but
+  `--json` and `--raw` are written with `print()` so pipes and `jq` get
+  byte-exact output. Progress messages belong on stderr.
 - **Model the portal, do not guess it.** New fields come from an observed
   response. Keep the raw body in `TaxpayerDetails.raw`, add the key to
   `_MAPPED_KEYS`, and let the `unmapped == {}` test prove nothing was dropped.
