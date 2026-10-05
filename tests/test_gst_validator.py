@@ -658,6 +658,36 @@ class TestRichOutput:
         assert "invalid GSTIN" in captured.err
 
 
+class TestUnmappedRendering:
+    def test_extra_fields_render_as_pairs(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A portal change surfaces in `extra`; it should read, not be a repr."""
+        grown = dict(PAYLOAD) | {"newField": "surprise"}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            match request.url.path:
+                case "/services/searchtp":
+                    return httpx.Response(200, text="<html></html>")
+                case "/services/captcha":
+                    return httpx.Response(
+                        200, content=b"\x89PNG", headers={"content-type": "image/png"}
+                    )
+                case "/services/api/search/taxpayerDetails":
+                    return httpx.Response(200, json=grown)
+                case _:
+                    return httpx.Response(200, json={"status": 1, "data": []})
+
+        monkeypatch.setattr(
+            "gst_validator.cli.GSTClient", lambda: _FakeClient(httpx.MockTransport(handler))
+        )
+        monkeypatch.setattr("builtins.input", _answer("1a2b3"))
+        assert main([VALID_GSTIN, "--no-color"]) == 0
+        stdout = capsys.readouterr().out
+        assert "newField: surprise" in stdout
+        assert "{'newField'" not in stdout
+
+
 class TestMarkupSafety:
     """Portal responses and argv are data, never rich markup."""
 

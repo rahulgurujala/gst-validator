@@ -118,6 +118,11 @@ def _format(value: object) -> str:
     if isinstance(value, list):
         items: list[Any] = cast(list[Any], value)  # type: ignore[redundant-cast]
         return "\n".join(str(item) for item in items)
+    if isinstance(value, dict):
+        # Only `extra` lands here, and only when the portal has grown a field
+        # this package does not model yet: worth reading, not a dict repr.
+        pairs: dict[str, Any] = cast(dict[str, Any], value)
+        return "\n".join(f"{key}: {item}" for key, item in pairs.items())
     return str(value)
 
 
