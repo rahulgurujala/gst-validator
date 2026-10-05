@@ -4,8 +4,15 @@
 
 ## Checklist
 
+- [ ] Commits follow [Conventional Commits](https://www.conventionalcommits.org/)
+      (`feat:`, `fix:`, `portal:`, `docs:`, `chore:`) so the release and the
+      changelog are generated correctly
 - [ ] `uv run ruff check .` and `uv run ruff format .` pass
 - [ ] `uv run mypy` and `uv run pyright` pass
 - [ ] `uv run pytest -q` passes, and new behaviour has a test
 - [ ] No real taxpayer data in code, tests or fixtures
-- [ ] `CHANGELOG.md` updated under "Unreleased" if this is user-visible
+
+<!--
+Do not edit CHANGELOG.md or the version in pyproject.toml: release-please
+writes both from the commit messages when the release pull request is merged.
+-->
