@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200" role="img" aria-label="gst-validator">
+  <title>gst-validator</title>
+  <path d="M100 12 L176 42 V104 C176 148 142 178 100 190 C58 178 24 148 24 104 V42 Z" fill="#122A4A"/>
+  <path d="M100 28 L160 51 V104 C160 139 134 164 100 175 C66 164 40 139 40 104 V51 Z" fill="#17365C"/>
+  <path d="M63 101 L89 127 L139 77" fill="none" stroke="#3FB98E" stroke-width="17" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
