@@ -9,26 +9,51 @@ authors = [
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.13"
-keywords = ["gst", "gstin", "india", "tax", "validator", "taxpayer"]
+keywords = [
+    "gst",
+    "gstin",
+    "gstin-validator",
+    "gst-api",
+    "india",
+    "indian",
+    "tax",
+    "taxation",
+    "taxpayer",
+    "compliance",
+    "fintech",
+    "validator",
+    "validation",
+    "cli",
+    "async",
+    "httpx",
+]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
+    "Framework :: AsyncIO",
     "Intended Audience :: Developers",
+    "Intended Audience :: Financial and Insurance Industry",
     "Natural Language :: English",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: WWW/HTTP",
     "Topic :: Office/Business :: Financial",
     "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Python Modules",
     "Typing :: Typed",
 ]
 dependencies = [
     "httpx>=0.28.1",
+    "rich>=15.0.0",
 ]
 
 [project.urls]
 Homepage = "https://github.com/rahulgurujala/gst-validator"
 Repository = "https://github.com/rahulgurujala/gst-validator"
+Documentation = "https://github.com/rahulgurujala/gst-validator#readme"
+Changelog = "https://github.com/rahulgurujala/gst-validator/blob/main/CHANGELOG.md"
+Releases = "https://github.com/rahulgurujala/gst-validator/releases"
 Issues = "https://github.com/rahulgurujala/gst-validator/issues"
 
 [project.scripts]
