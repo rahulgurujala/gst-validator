@@ -2,11 +2,11 @@
 
 Validate Indian GSTINs offline and pull taxpayer details from the public GST
 portal. Ships as a typed library (`import gst_validator`) and a CLI
-(`gst-validator`) — the CLI is a thin wrapper over the same public API, so
+(`gst-validator`). The CLI is a thin wrapper over the same public API, so
 anything it does, your app can do.
 
 - Offline GSTIN validation: format **and** mod-36 checksum, no network
-- Structured objects, not raw dicts — dates parsed, `"NA"`/`""` normalised to `None`
+- Structured objects, not raw dicts: dates parsed, `"NA"`/`""` normalised to `None`
 - Captcha as bytes / base64 / data URI, so a browser or a human can solve it
 - Sync and async clients, strict-typed, `py.typed`
 - Built-in TTL cache, because each lookup costs one human-solved captcha
@@ -84,7 +84,7 @@ data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAALY...
 captcha text: 784077
 ```
 
-The data URI goes to stdout — paste it into a browser address bar, drop it in
+The data URI goes to stdout. Paste it into a browser address bar, drop it in
 an `<img src=...>`, or hand it to a solving service. The process keeps the
 portal session open while it waits on stdin, which is what makes this work.
 
@@ -122,11 +122,25 @@ Everything is importable from the package root:
 
 ```python
 from gst_validator import (
-    GSTIN, Captcha, GSTClient, AsyncGSTClient,
-    TaxpayerDetails, TaxpayerProfile, Address, Jurisdiction,
-    GoodsOrService, FinancialYear, FilingPreference,
-    TTLCache, NullCache, DEFAULT_CACHE, TaxpayerCache,
-    GSTValidatorError, InvalidGSTINError, CaptchaError, TaxpayerLookupError,
+    GSTIN,
+    Captcha,
+    GSTClient,
+    AsyncGSTClient,
+    TaxpayerDetails,
+    TaxpayerProfile,
+    Address,
+    Jurisdiction,
+    GoodsOrService,
+    FinancialYear,
+    FilingPreference,
+    TTLCache,
+    NullCache,
+    DEFAULT_CACHE,
+    TaxpayerCache,
+    GSTValidatorError,
+    InvalidGSTINError,
+    CaptchaError,
+    TaxpayerLookupError,
 )
 ```
 
@@ -135,21 +149,21 @@ from gst_validator import (
 ```python
 from gst_validator import GSTIN, InvalidGSTINError
 
-GSTIN.is_valid("27AAACR5055K1Z7")      # True  - never raises
-GSTIN.is_valid("27AAACR5055K1ZA")      # False - checksum digit is wrong
+GSTIN.is_valid("27AAACR5055K1Z7")  # True  - never raises
+GSTIN.is_valid("27AAACR5055K1ZA")  # False - checksum digit is wrong
 
-gstin = GSTIN.parse(" 27aaacr5055k1z7 ")   # strips, upper-cases, validates
-gstin.value                  # '27AAACR5055K1Z7'
-gstin.state_code             # '27'
-gstin.state_name             # 'Maharashtra'
-gstin.pan                    # 'AAACR5055K'
-gstin.entity_type            # 'Company'   (4th PAN character)
+gstin = GSTIN.parse(" 27aaacr5055k1z7 ")  # strips, upper-cases, validates
+gstin.value  # '27AAACR5055K1Z7'
+gstin.state_code  # '27'
+gstin.state_name  # 'Maharashtra'
+gstin.pan  # 'AAACR5055K'
+gstin.entity_type  # 'Company'   (4th PAN character)
 gstin.registration_sequence  # '1'         (Nth registration of this PAN in this state)
 
 try:
     GSTIN.parse(user_input)
 except InvalidGSTINError as error:
-    print(error.value, error.reason)   # the input, and why it was rejected
+    print(error.value, error.reason)  # the input, and why it was rejected
 ```
 
 `GSTIN` is a frozen dataclass: hashable, comparable, usable as a dict key.
@@ -157,7 +171,7 @@ Take one as a function parameter and malformed input cannot reach your code.
 
 ## 2. The data you get without a captcha
 
-Three portal endpoints return data with no captcha at all — verified against
+Three portal endpoints return data with no captcha at all, verified against
 the live portal with no cookies and no prior captcha solve. The client still
 opens a session first, since the portal could tighten this at any time:
 
@@ -191,10 +205,10 @@ with GSTClient() as client:
     solved = input(f"solve this: {captcha.data_uri}\n> ")
     profile = client.fetch_profile("27AAACR5055K1Z7", solved)
 
-profile.name          # registered trade name, else the legal name
-profile.is_active     # True
-profile.details       # TaxpayerDetails
-profile.as_dict()     # everything, JSON-ready
+profile.name  # registered trade name, else the legal name
+profile.is_active  # True
+profile.details  # TaxpayerDetails
+profile.as_dict()  # everything, JSON-ready
 ```
 
 `fetch_details()` instead of `fetch_profile()` if you only want the
@@ -202,7 +216,7 @@ captcha-gated part.
 
 ## 4. Web app: captcha to the browser, text back
 
-The pattern the original Flask app was reaching for — keep one client per
+The pattern the original Flask app was reaching for: keep one client per
 pending lookup, keyed by a session id:
 
 ```python
@@ -211,7 +225,8 @@ from fastapi import FastAPI, HTTPException
 from gst_validator import GSTClient, GSTValidatorError, InvalidGSTINError
 
 app = FastAPI()
-pending: dict[str, GSTClient] = {}        # swap for Redis + a TTL in production
+pending: dict[str, GSTClient] = {}  # swap for Redis + a TTL in production
+
 
 @app.post("/captcha")
 def start() -> dict[str, str]:
@@ -220,6 +235,7 @@ def start() -> dict[str, str]:
     session_id = str(uuid.uuid4())
     pending[session_id] = client
     return {"session_id": session_id, "image": captcha.data_uri}
+
 
 @app.post("/lookup")
 def lookup(session_id: str, gstin: str, captcha: str) -> dict[str, object]:
@@ -236,7 +252,7 @@ def lookup(session_id: str, gstin: str, captcha: str) -> dict[str, object]:
         client.close()
 ```
 
-The front end renders `image` straight into `<img src="{{ image }}">` — it is
+The front end renders `image` straight into `<img src="{{ image }}">`, since it is
 already a `data:` URI. Give `pending` an expiry; portal sessions do not live
 forever, and an abandoned entry leaks a connection pool.
 
@@ -248,10 +264,12 @@ Same API, `await` and `async with`:
 import asyncio
 from gst_validator import AsyncGSTClient
 
+
 async def codes(gstin: str) -> tuple[str, ...]:
     async with AsyncGSTClient() as client:
         items = await client.fetch_goods_and_services(gstin)
         return tuple(item.code or "" for item in items)
+
 
 asyncio.run(codes("27AAACR5055K1Z7"))
 ```
@@ -264,17 +282,17 @@ cached in a process-wide `TTLCache` (24 h, 512 entries, LRU, thread-safe).
 ```python
 from gst_validator import DEFAULT_CACHE, GSTClient, NullCache, TTLCache
 
-GSTClient()                          # shares DEFAULT_CACHE
-GSTClient(cache=TTLCache(ttl=300))   # private, 5-minute cache
-GSTClient(cache=NullCache())         # caching off
+GSTClient()  # shares DEFAULT_CACHE
+GSTClient(cache=TTLCache(ttl=300))  # private, 5-minute cache
+GSTClient(cache=NullCache())  # caching off
 
 with GSTClient() as client:
     if (hit := client.cached(gstin)) is not None:
-        details = hit                                  # no captcha spent
+        details = hit  # no captcha spent
     else:
         details = client.fetch_details(gstin, solved)
 
-    client.fetch_details(gstin, solved, refresh=True)   # bypass and overwrite
+    client.fetch_details(gstin, solved, refresh=True)  # bypass and overwrite
 ```
 
 Back it with anything that satisfies the `TaxpayerCache` protocol:
@@ -282,6 +300,7 @@ Back it with anything that satisfies the `TaxpayerCache` protocol:
 ```python
 import json
 from gst_validator import TaxpayerDetails
+
 
 class RedisCache:
     def __init__(self, redis, ttl: int = 86_400) -> None:
@@ -293,6 +312,7 @@ class RedisCache:
 
     def set(self, gstin: str, details: TaxpayerDetails) -> None:
         self._redis.setex(f"gst:{gstin}", self._ttl, json.dumps(details.raw))
+
 
 client = GSTClient(cache=RedisCache(redis_connection))
 ```
@@ -318,18 +338,18 @@ from gst_validator import CaptchaError, GSTValidatorError, InvalidGSTINError, Ta
 try:
     profile = client.fetch_profile(gstin, solved)
 except InvalidGSTINError:
-    ...                      # bad input, never hit the network
+    ...  # bad input, never hit the network
 except CaptchaError:
-    ...                      # portal did not hand out an image
+    ...  # portal did not hand out an image
 except TaxpayerLookupError as error:
     if error.code == "SWEB_9000":
-        ...                  # wrong or expired captcha - fetch a new one
+        ...  # wrong or expired captcha - fetch a new one
 except GSTValidatorError:
-    ...                      # catch-all for this package
+    ...  # catch-all for this package
 ```
 
 The portal answers rejections with HTTP 200 and a body carrying an
-`errorCode`, so the *absence* of `gstin` in the body — not the status code —
+`errorCode`, so the *absence* of `gstin` in the body, not the status code,
 is what marks a failed lookup. One `except GSTValidatorError` catches
 everything this package raises; `httpx` errors are wrapped, never leaked.
 
@@ -355,7 +375,7 @@ Shortcuts: `gstin`, `name`, `is_active`, `as_dict()`.
 | `gstin` / `number` | `gstin` | `str` / `GSTIN \| None` |
 | `legal_name` | `lgnm` | `str \| None` |
 | `trade_name` | `tradeNam` | `str \| None` |
-| `name` | — | trade name, else legal name |
+| `name` | (derived) | trade name, else legal name |
 | `status` | `sts` | `str \| None` |
 | `constitution` | `ctb` | `str \| None` |
 | `taxpayer_type` | `dty` | `str \| None` |
@@ -377,7 +397,7 @@ Shortcuts: `gstin`, `name`, `is_active`, `as_dict()`.
 | `raw` | everything | `dict[str, Any]` |
 
 Helpers: `is_active`, `is_cancelled`, `addresses` (principal first),
-`as_dict()`, and `unmapped` — portal keys this class does not model, so a new
+`as_dict()`, and `unmapped`, which lists portal keys this class does not model, so a new
 portal field is never silently dropped.
 
 `Address` carries split fields (`building_name`, `street`, `pincode`, …) *and*
@@ -405,13 +425,14 @@ The portal fingerprints clients, so the package sends a browser `User-Agent`
 and the `Referer`/`Origin` headers the site expects; without them the captcha
 request is reset. For unattended or high-volume use, the official
 [GST API](https://developer.gst.gov.in/) through a licensed GSP is the
-supported route — this package drives the public, captcha-gated search.
+supported route; this package drives the public, captcha-gated search.
 
 ---
 
 # Development
 
 ```bash
+uv sync              # install, including dev dependencies
 uv run pytest        # 46 tests, fully offline via httpx.MockTransport
 uv run mypy          # strict
 uv run pyright       # strict
@@ -425,3 +446,41 @@ so a portal schema change fails the suite instead of quietly losing data.
 
 All GSTINs in this README and in the tests are fictional placeholders built
 on the dummy PAN `AAACR5055K`; they are checksum-valid but belong to nobody.
+
+## Releasing
+
+CI runs lint, both type checkers, the tests and a build on every push and PR.
+
+To publish a release:
+
+```bash
+uv version --bump patch        # or minor / major
+git commit -am "Release v$(uv version --short)"
+git tag "v$(uv version --short)"
+git push origin main --tags
+```
+
+The tag triggers `.github/workflows/release.yml`, which re-runs the checks,
+builds the sdist and wheel, publishes to PyPI and creates a GitHub release
+with generated notes. The workflow refuses to publish if the tag does not
+match the version in `pyproject.toml`.
+
+Publishing uses [PyPI Trusted Publishing](https://docs.pypi.org/trusted-publishers/)
+(OIDC, no stored secret). One-time setup on PyPI, under
+*Your projects -> Publishing* (or *Pending publishers* for a name that does
+not exist yet):
+
+| Field | Value |
+|---|---|
+| PyPI project name | `gst-validator` |
+| Owner | `rahulgurujala` |
+| Repository name | `gst-validator` |
+| Workflow name | `release.yml` |
+| Environment name | `pypi` |
+
+If a `PYPI_API_TOKEN` repository secret is set instead, the workflow uses that
+and skips OIDC.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
