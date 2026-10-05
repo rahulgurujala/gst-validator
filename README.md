@@ -29,10 +29,10 @@ portal's undocumented endpoints in objects you can actually hold.
 ```python
 from gst_validator import GSTIN, GSTClient
 
-GSTIN.is_valid("27AAACR5055K1Z7")          # True, offline, no network
+GSTIN.is_valid("27AAACR5055K1Z7")  # True, offline, no network
 
 with GSTClient() as client:
-    client.fetch_goods_and_services("27AAACR5055K1Z7")   # no captcha needed
+    client.fetch_goods_and_services("27AAACR5055K1Z7")  # no captcha needed
 ```
 
 ## Why this exists
