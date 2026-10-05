@@ -1,0 +1,24 @@
+{
+  "bzgddtls": [
+    {
+      "gdes": "OTHER",
+      "hsncd": "55151190"
+    },
+    {
+      "gdes": "POLYPROPYLENE ARTICLES, NOT ELSEWHERE SPECIFIED OR INCLUDED",
+      "hsncd": "39269080"
+    },
+    {
+      "gdes": "ETHYLENE, PROPYLENE, BUTYLENE AND BUTADIENE",
+      "hsncd": "27111400"
+    },
+    {
+      "gdes": "OTHER, OF POLYESTERS, PARTIALLY ORIENTED",
+      "hsncd": "54024600"
+    },
+    {
+      "gdes": "WASHING PREPARATIONS (INCLUDING AUXILIARY WASHING PREPARATIONS) AND CLEANING PREPARATIONS, HAVING A BASIS OF SOAP OR OTHER ORGANIC SURFACE ACTIVE AGENTS",
+      "hsncd": "34029091"
+    }
+  ]
+}

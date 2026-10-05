@@ -1,0 +1,25 @@
+{
+  "ntcrbs": "SPO",
+  "adhrVFlag": "Yes",
+  "lgnm": "EXAMPLE RESEARCH AND ANALYTICS SOLUTIONS PRIVATE LIMITED",
+  "stj": "State - Maharashtra,Zone - MUMBAI_SOUTH_WEST,Division - ANDHERI,Charge - ANDHERI-WEST_702",
+  "dty": "Regular",
+  "cxdt": "",
+  "gstin": "27ABCCE1234F1Z2",
+  "nba": [
+    "Supplier of Services"
+  ],
+  "ekycVFlag": "Not Applicable",
+  "cmpRt": "NA",
+  "rgdt": "15/09/2025",
+  "ctb": "Private Limited Company",
+  "pradr": {
+    "adr": "ROOM NO.1, EXAMPLE NAGAR, Sample Lane, SPECIMEN ROAD, TEST COLONY, Andheri West, Mumbai, Mumbai Suburban, Maharashtra, 400058"
+  },
+  "sts": "Active",
+  "tradeNam": "EXAMPLE RESEARCH AND ANALYTICS SOLUTIONS PRIVATE LIMITED",
+  "isFieldVisitConducted": "No",
+  "adhrVdt": "22/09/2025",
+  "ctj": "State - CBIC,Zone - MUMBAI,Commissionerate - MUMBAI-WEST,Division - DIVISION VII,Range - RANGE-II (Jurisdictional Office)",
+  "einvoiceStatus": "No"
+}
