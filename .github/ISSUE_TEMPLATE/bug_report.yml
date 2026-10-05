@@ -1,0 +1,45 @@
+name: Bug report
+description: Something does not work as documented
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please do not paste a real taxpayer's details. Redact the GSTIN, name
+        and address, or use a public company's registration.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: The smallest command or snippet that shows the problem.
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `uv run gst-validator --help | head -1` or the installed version.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      placeholder: "3.13.2"
+    validations:
+      required: true
+  - type: textarea
+    id: payload
+    attributes:
+      label: Portal response (optional)
+      description: Output of `--raw`, with identifying values replaced.
+      render: json

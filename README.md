@@ -1,29 +1,81 @@
+<div align="center">
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/rahulgurujala/gst-validator/main/assets/logo-dark.svg">
+  <img src="https://raw.githubusercontent.com/rahulgurujala/gst-validator/main/assets/logo.svg" alt="gst-validator" width="128" height="128">
+</picture>
+
 # gst-validator
 
-Validate Indian GSTINs offline and pull taxpayer details from the public GST
-portal. Ships as a typed library (`import gst_validator`) and a CLI
-(`gst-validator`). The CLI is a thin wrapper over the same public API, so
-anything it does, your app can do.
+**Validate Indian GSTINs offline and pull taxpayer details from the public GST portal.**
 
-- Offline GSTIN validation: format **and** mod-36 checksum, no network
-- Structured objects, not raw dicts: dates parsed, `"NA"`/`""` normalised to `None`
-- Captcha as bytes / base64 / data URI, so a browser or a human can solve it
-- Sync and async clients, strict-typed, `py.typed`
-- Built-in TTL cache, because each lookup costs one human-solved captcha
-- Three extra portal endpoints that need **no captcha** at all
+[![PyPI](https://img.shields.io/pypi/v/gst-validator?color=0d7377&label=pypi)](https://pypi.org/project/gst-validator/)
+[![Python](https://img.shields.io/pypi/pyversions/gst-validator)](https://pypi.org/project/gst-validator/)
+[![CI](https://github.com/rahulgurujala/gst-validator/actions/workflows/ci.yml/badge.svg)](https://github.com/rahulgurujala/gst-validator/actions/workflows/ci.yml)
+[![License](https://img.shields.io/pypi/l/gst-validator?color=blue)](LICENSE)
+[![Typed](https://img.shields.io/badge/typing-strict-blue)](https://peps.python.org/pep-0561/)
+[![Downloads](https://img.shields.io/pypi/dm/gst-validator?color=777)](https://pypi.org/project/gst-validator/)
+
+[Install](#install) · [CLI](#cli) · [Library](#using-it-in-your-app) · [Data](#what-you-get-back) · [Contributing](#contributing)
+
+</div>
+
+---
+
+A typed Python library and CLI for the Indian GST taxpayer search. It checks a
+GSTIN's structure and checksum without touching the network, and wraps the
+portal's undocumented endpoints in objects you can actually hold.
+
+```python
+from gst_validator import GSTIN, GSTClient
+
+GSTIN.is_valid("27AAACR5055K1Z7")          # True, offline, no network
+
+with GSTClient() as client:
+    client.fetch_goods_and_services("27AAACR5055K1Z7")   # no captcha needed
+```
+
+## Why this exists
+
+The GST portal has no public API for taxpayer search. What it has is a
+captcha-gated web form and a handful of undocumented JSON endpoints that
+return `"NA"` for null, `dd/mm/yyyy` for dates, two different shapes for the
+same field, and HTTP 200 for errors. This package absorbs that so your code
+sees `datetime.date`, `None` and exceptions.
+
+| | |
+|---|---|
+| **Offline validation** | Format and mod-36 checksum, plus state, PAN and entity type decoded from the number |
+| **Typed objects** | Dates parsed, `"NA"` / `""` / `null` normalised, nothing silently dropped |
+| **Captcha, your way** | Raw bytes, base64 or a `data:` URI, so a browser, a human or a service can solve it |
+| **Three free endpoints** | HSN/SAC codes, financial years and filing preferences need no captcha at all |
+| **Sync and async** | The same API with `await`, both strict-typed and `py.typed` |
+| **Caching built in** | A lookup costs a human-solved captcha, so results are cached by default |
 
 ## Install
 
 ```bash
-uv add gst-validator          # into your project
-uv sync                       # working on this repo
+uv add gst-validator          # into a uv project
+pip install gst-validator     # or plain pip
+uvx gst-validator --help      # or run it without installing
 ```
 
-Requires Python 3.13+. Only runtime dependency: `httpx`.
+Python 3.13 or newer. The only runtime dependency is
+[httpx](https://www.python-httpx.org/).
+
+## Quick start
+
+```bash
+# Is this GSTIN well-formed? No network, no captcha.
+gst-validator 27AAACR5055K1Z7 --offline
+
+# Full lookup: writes the captcha image, waits for you to type it.
+gst-validator 27AAACR5055K1Z7 --json
+```
 
 ---
 
-# CLI
+## CLI
 
 ```
 gst-validator [-h] [--offline] [--json] [--details-only] [--raw]
@@ -116,7 +168,7 @@ fi
 
 ---
 
-# Using it in your app
+## Using it in your app
 
 Everything is importable from the package root:
 
@@ -144,7 +196,7 @@ from gst_validator import (
 )
 ```
 
-## 1. Validate a GSTIN (no network, no captcha)
+### 1. Validate a GSTIN (no network, no captcha)
 
 ```python
 from gst_validator import GSTIN, InvalidGSTINError
@@ -169,7 +221,7 @@ except InvalidGSTINError as error:
 `GSTIN` is a frozen dataclass: hashable, comparable, usable as a dict key.
 Take one as a function parameter and malformed input cannot reach your code.
 
-## 2. The data you get without a captcha
+### 2. The data you get without a captcha
 
 Three portal endpoints return data with no captcha at all, verified against
 the live portal with no cookies and no prior captcha solve. The client still
@@ -194,7 +246,7 @@ with GSTClient() as client:
     # (FilingPreference(quarter='Q1', preference='Q'), ...)   -> .is_quarterly / .is_monthly
 ```
 
-## 3. The full lookup (one captcha)
+### 3. The full lookup (one captcha)
 
 The captcha is bound to the client's cookies, so fetch and submit must happen
 on the **same instance**:
@@ -214,7 +266,7 @@ profile.as_dict()  # everything, JSON-ready
 `fetch_details()` instead of `fetch_profile()` if you only want the
 captcha-gated part.
 
-## 4. Web app: captcha to the browser, text back
+### 4. Web app: captcha to the browser, text back
 
 The pattern the original Flask app was reaching for: keep one client per
 pending lookup, keyed by a session id:
@@ -256,7 +308,7 @@ The front end renders `image` straight into `<img src="{{ image }}">`, since it 
 already a `data:` URI. Give `pending` an expiry; portal sessions do not live
 forever, and an abandoned entry leaks a connection pool.
 
-## 5. Async
+### 5. Async
 
 Same API, `await` and `async with`:
 
@@ -274,7 +326,7 @@ async def codes(gstin: str) -> tuple[str, ...]:
 asyncio.run(codes("27AAACR5055K1Z7"))
 ```
 
-## 6. Caching
+### 6. Caching
 
 Each live lookup costs a human-solved captcha, so successful results are
 cached in a process-wide `TTLCache` (24 h, 512 entries, LRU, thread-safe).
@@ -323,7 +375,7 @@ concurrent lookups. The *cache* is the shared piece; clients stay cheap and
 short-lived. The cache stores `.raw`, so a cached entry survives a model
 upgrade.
 
-## 7. Error handling
+### 7. Error handling
 
 ```
 GSTValidatorError
@@ -355,7 +407,7 @@ everything this package raises; `httpx` errors are wrapped, never leaked.
 
 ---
 
-# What you get back
+## What you get back
 
 ### `TaxpayerProfile`
 
@@ -406,7 +458,7 @@ portal field is never silently dropped.
 
 ---
 
-# Endpoints and what each costs
+## Endpoints and what each costs
 
 | Method | Endpoint | Captcha? |
 |---|---|---|
@@ -429,7 +481,7 @@ supported route; this package drives the public, captcha-gated search.
 
 ---
 
-# Development
+## Development
 
 ```bash
 uv sync              # install, including dev dependencies
@@ -480,6 +532,37 @@ not exist yet):
 
 If a `PYPI_API_TOKEN` repository secret is set instead, the workflow uses that
 and skips OIDC.
+
+
+## Contributing
+
+Issues and pull requests are welcome. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for the setup and the house rules; the
+short version:
+
+```bash
+uv sync
+uv run pytest -q && uv run ruff check . && uv run mypy && uv run pyright
+```
+
+Two rules matter more than the rest: **tests never touch the network**
+(everything goes through `httpx.MockTransport`), and **no real taxpayer's data
+in the repo** - fixtures use a public company's registration or a fictional,
+checksum-valid GSTIN.
+
+If the portal changes shape, that is a
+[portal change issue](https://github.com/rahulgurujala/gst-validator/issues/new?template=portal_change.yml);
+include the output of `--raw` with the identifying values replaced.
+
+Security reports go through
+[private advisories](https://github.com/rahulgurujala/gst-validator/security/advisories/new),
+not public issues. See [SECURITY.md](SECURITY.md).
+
+## Links
+
+- [PyPI](https://pypi.org/project/gst-validator/)
+- [Changelog](CHANGELOG.md)
+- [Official GST developer portal](https://developer.gst.gov.in/) - the licensed GSP route for unattended, high-volume use
 
 ## License
 

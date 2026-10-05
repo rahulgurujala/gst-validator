@@ -1,0 +1,30 @@
+name: Portal changed
+description: The GST portal returned a shape this package does not handle
+labels: ["portal-change"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The portal is undocumented and changes without notice. Redact anything
+        identifying before posting a payload.
+  - type: textarea
+    id: symptom
+    attributes:
+      label: What is missing or wrong
+      description: Which field is empty, mis-parsed, or newly unknown.
+    validations:
+      required: true
+  - type: textarea
+    id: unmapped
+    attributes:
+      label: Unmapped keys
+      description: "Output of: python -c \"...; print(details.unmapped)\", or the new keys you saw."
+      render: python
+  - type: textarea
+    id: payload
+    attributes:
+      label: Redacted payload
+      description: Output of `gst-validator <GSTIN> --raw`, with values replaced.
+      render: json
+    validations:
+      required: true
