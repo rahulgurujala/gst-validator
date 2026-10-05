@@ -2,13 +2,17 @@
 
 import asyncio
 import json
+import subprocess
+import sys
 from collections.abc import Callable
 from datetime import date
+from importlib import metadata
 from pathlib import Path
 
 import httpx
 import pytest
 
+import gst_validator
 from gst_validator import (
     GSTIN,
     Address,
@@ -243,6 +247,11 @@ class TestTaxpayerDetails:
         payload = json.dumps(details.as_dict())
         assert '"registration_date": "2017-07-01"' in payload
 
+    def test_unknown_core_business_code_passes_through(self) -> None:
+        """Better a raw code than a confidently wrong expansion."""
+        details = TaxpayerDetails.from_payload({"gstin": VALID_GSTIN, "ntcrbs": "ZZZ"})
+        assert details.core_business_activity == "ZZZ"
+
     def test_missing_keys_tolerated(self) -> None:
         bare = TaxpayerDetails.from_payload({"gstin": VALID_GSTIN})
         assert bare.name is None
@@ -338,7 +347,10 @@ class TestLivePayload:
         assert live.unmapped == {}
 
     def test_extra_fields(self, live: TaxpayerDetails) -> None:
-        assert live.core_business_activity == "Supplier of Services"  # from the 'SPO' code
+        # "SPO" is the portal's Core Business Activity code, a different field
+        # from `nba` ("Supplier of Services") that sits beside it in the payload.
+        assert live.core_business_activity == "Service Provider and Others"
+        assert live.nature_of_business == ("Supplier of Services",)
         assert live.aadhaar_verified is True
         assert live.aadhaar_verified_on == date(2025, 9, 22)
         assert live.ekyc_status == "Not Applicable"
@@ -477,9 +489,21 @@ class TestCaptchaFreeEndpoints:
             return httpx.Response(200, json={"status": 0, "errorCode": "SWEB_9035"})
 
         with GSTClient(transport=httpx.MockTransport(handler)) as client:
-            with pytest.raises(TaxpayerLookupError, match="no taxpayer found") as caught:
+            with pytest.raises(TaxpayerLookupError, match="locked") as caught:
                 client.fetch_financial_years(VALID_GSTIN)
         assert caught.value.code == "SWEB_9035"
+
+    def test_unknown_error_code_is_not_given_an_invented_meaning(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/services/searchtp":
+                return httpx.Response(200, text="<html></html>")
+            return httpx.Response(200, json={"status": 0, "errorCode": "SWEB_4242"})
+
+        with GSTClient(transport=httpx.MockTransport(handler)) as client:
+            # Surfaced as-is; the caller can still branch on `.code`.
+            with pytest.raises(TaxpayerLookupError, match="SWEB_4242") as caught:
+                client.fetch_financial_years(VALID_GSTIN)
+        assert caught.value.code == "SWEB_4242"
 
     def test_invalid_gstin_never_reaches_the_network(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover
@@ -503,3 +527,132 @@ class TestAsyncClient:
         assert profile.details.legal_name == "ACME TRADERS"
         assert len(profile.goods_and_services) == 1
         assert len(profile.filing_preferences) == 2
+
+
+class TestPackaging:
+    """Guards that the release machinery cannot silently drift."""
+
+    def test_dunder_version_matches_the_installed_distribution(self) -> None:
+        """release-please bumps both; an edit to the marker would desync them."""
+        assert gst_validator.__version__ == metadata.version("gst-validator")
+
+    def test_everything_in_dunder_all_is_importable(self) -> None:
+        missing = [name for name in gst_validator.__all__ if not hasattr(gst_validator, name)]
+        assert missing == []
+
+    def test_module_entry_point_runs(self) -> None:
+        """`python -m gst_validator` is documented, so it must work."""
+        result = subprocess.run(
+            [sys.executable, "-m", "gst_validator", VALID_GSTIN, "--offline", "--json"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert json.loads(result.stdout)["valid"] is True
+
+
+class TestOfflineOutput:
+    def test_json_carries_everything_the_number_encodes(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert main([VALID_GSTIN, "--offline", "--json"]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload == {
+            "gstin": VALID_GSTIN,
+            "valid": True,
+            "state_code": "27",
+            "state_name": "Maharashtra",
+            "pan": "ABCFE1234F",
+            "entity_type": "Firm / LLP",
+            "registration_sequence": "1",
+        }
+
+
+class TestCaptchaSave:
+    def test_accepts_both_str_and_path(self, tmp_path: Path) -> None:
+        captcha = Captcha(b"\x89PNG-bytes")
+        as_path = tmp_path / "from-path.png"
+        as_str = tmp_path / "from-str.png"
+        captcha.save(as_path)
+        captcha.save(str(as_str))
+        assert as_path.read_bytes() == as_str.read_bytes() == b"\x89PNG-bytes"
+
+
+class TestRichOutput:
+    """The human output is styled; the machine output must stay byte-exact."""
+
+    def test_json_output_has_no_styling_or_wrapping(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("gst_validator.cli.GSTClient", lambda: _FakeClient(_transport()))
+        monkeypatch.setattr("builtins.input", _answer("1a2b3"))
+        assert main([VALID_GSTIN, "--json"]) == 0
+        stdout = capsys.readouterr().out
+        assert "\x1b[" not in stdout  # no ANSI escapes
+        assert json.loads(stdout)["legal_name"] == "ACME TRADERS"
+
+    def test_raw_output_round_trips(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("gst_validator.cli.GSTClient", lambda: _FakeClient(_transport()))
+        monkeypatch.setattr("builtins.input", _answer("1a2b3"))
+        assert main([VALID_GSTIN, "--raw"]) == 0
+        assert json.loads(capsys.readouterr().out) == PAYLOAD
+
+    def test_table_renders_objects_not_dicts(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("gst_validator.cli.GSTClient", lambda: _FakeClient(_transport()))
+        monkeypatch.setattr("builtins.input", _answer("1a2b3"))
+        assert main([VALID_GSTIN, "--no-color"]) == 0
+        stdout = capsys.readouterr().out
+        assert "998314 - Information technology design services" in stdout
+        assert "Q1: quarterly" in stdout
+        assert "{'code'" not in stdout  # never the repr of a dict
+        assert "is active" not in stdout  # redundant with `status`
+
+    def test_offline_table_lists_the_decoded_parts(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert main([VALID_GSTIN, "--offline", "--no-color"]) == 0
+        stdout = capsys.readouterr().out
+        assert "valid" in stdout
+        assert "Maharashtra" in stdout
+        assert "Firm / LLP" in stdout
+
+    def test_prompt_never_lands_on_stdout(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A real `input()` writes its prompt to stdout, which would corrupt --json.
+
+        The stub here mimics that, so the test fails if the prompt is ever
+        passed to `input()` again instead of being printed to stderr.
+        """
+
+        def prompting_input(prompt: str = "") -> str:
+            sys.stdout.write(prompt)
+            return "1a2b3"
+
+        monkeypatch.setattr("gst_validator.cli.GSTClient", lambda: _FakeClient(_transport()))
+        monkeypatch.setattr("builtins.input", prompting_input)
+        assert main([VALID_GSTIN, "--json"]) == 0
+        captured = capsys.readouterr()
+        assert json.loads(captured.out)["gstin"] == VALID_GSTIN
+        assert "captcha text" in captured.err
+
+    def test_captcha_data_uri_goes_to_stderr(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """--captcha-base64 with --json must leave stdout as pure JSON."""
+        monkeypatch.setattr("gst_validator.cli.GSTClient", lambda: _FakeClient(_transport()))
+        monkeypatch.setattr("builtins.input", _answer("1a2b3"))
+        assert main([VALID_GSTIN, "--json", "--captcha-base64"]) == 0
+        captured = capsys.readouterr()
+        assert json.loads(captured.out)["gstin"] == VALID_GSTIN
+        assert "data:image/png;base64," in captured.err
+
+    def test_errors_go_to_stderr(self, capsys: pytest.CaptureFixture[str]) -> None:
+        assert main(["NOPE", "--offline"]) == 2
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "invalid GSTIN" in captured.err

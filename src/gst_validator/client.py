@@ -29,10 +29,13 @@ _DEFAULT_USER_AGENT: Final = (
 )
 _DEFAULT_RETRIES: Final = 2
 
-# Portal error codes that are worth explaining instead of echoing verbatim.
+# Portal error codes worth explaining instead of echoing verbatim. Only codes
+# whose meaning has been confirmed belong here (SWEB_9000 from live responses,
+# SWEB_9035 from the portal's published error-code list); an unknown code is
+# reported as-is on the exception, which beats guessing at its meaning.
 _ERROR_HINTS: Final[dict[str, str]] = {
     "SWEB_9000": "invalid or expired captcha - fetch a new one from the same client",
-    "SWEB_9035": "no taxpayer found for this GSTIN",
+    "SWEB_9035": "the account is locked on the portal",
 }
 
 

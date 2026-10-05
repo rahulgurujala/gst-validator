@@ -1,9 +1,11 @@
 """Value objects returned by :mod:`gst_validator`."""
 
 import base64
+import os
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from pathlib import Path
 from typing import Any, Final, Self, cast
 
 from .exceptions import InvalidGSTINError
@@ -19,6 +21,9 @@ __all__ = [
     "TaxpayerDetails",
     "TaxpayerProfile",
 ]
+
+type StrPath = str | os.PathLike[str]
+"""Anything :func:`open` accepts: a ``str`` or a :class:`pathlib.Path`."""
 
 _GSTIN_PATTERN: Final = re.compile(r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$")
 _CHECKSUM_ALPHABET: Final = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -67,14 +72,16 @@ _STATE_NAMES: Final[dict[str, str]] = {
     "97": "Other Territory",
     "99": "Centre Jurisdiction",
 }
-# ``ntcrbs`` ships as a short code.
+# ``ntcrbs`` is the taxpayer's Core Business Activity, a field the portal
+# added in March 2021 with exactly three choices: Manufacturer, Trader, and
+# Service Provider and Others (wholesaler and retailer are sub-types of
+# Trader, not categories of their own). "SPO" is the only code seen in a live
+# response; the other two are inferred from those names. An unrecognised code
+# passes through unchanged rather than being guessed at.
 _CORE_BUSINESS: Final[dict[str, str]] = {
-    "SPO": "Supplier of Services",
+    "SPO": "Service Provider and Others",
     "MFR": "Manufacturer",
     "TRD": "Trader",
-    "RTL": "Retailer",
-    "WHL": "Wholesaler",
-    "OTH": "Others",
 }
 
 # 4th PAN character encodes the holder type.
@@ -207,10 +214,9 @@ class Captcha:
         """``data:`` URI, drop-in for an ``<img src=...>`` in a web UI."""
         return f"data:{self.media_type};base64,{self.base64}"
 
-    def save(self, path: str) -> None:
+    def save(self, path: StrPath) -> None:
         """Write the raw image bytes to ``path``."""
-        with open(path, "wb") as handle:
-            handle.write(self.content)
+        Path(path).write_bytes(self.content)
 
 
 @dataclass(frozen=True, slots=True)
