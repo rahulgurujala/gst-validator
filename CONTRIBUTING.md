@@ -56,17 +56,46 @@ A failing `unmapped == {}` assertion is the intended signal, not a flake.
 
 ## Commit messages
 
-Describe the change and why. No AI attribution lines.
+This repository releases itself from commit messages, so they follow
+[Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+feat: add fetch_returns() for the filing history endpoint
+fix: parse pradr when the portal sends split address fields
+portal: handle bzgddtls for goods taxpayers
+docs: explain the captcha session lifetime
+chore: bump ruff
+```
+
+| Prefix | Effect on the next release | Appears in the changelog as |
+|---|---|---|
+| `feat:` | minor bump (0.1.0 -> 0.2.0) | Added |
+| `fix:` | patch bump (0.1.0 -> 0.1.1) | Fixed |
+| `portal:` | patch bump | Portal changes |
+| `perf:` | patch bump | Performance |
+| `deps:` | patch bump | Dependencies |
+| `docs:`, `ci:`, `test:`, `refactor:`, `chore:` | no release | hidden |
+| `feat!:` or a `BREAKING CHANGE:` footer | major bump once past 1.0 | Breaking |
+
+Anything else is ignored by the release tooling, so a commit with no prefix
+never ships. Do not edit `CHANGELOG.md` or the version in `pyproject.toml` by
+hand; both are written for you. And no AI attribution lines.
 
 ## Releasing (maintainers)
 
-```bash
-uv version --bump patch      # or minor / major
-git commit -am "Release v$(uv version --short)"
-git tag "v$(uv version --short)"
-git push origin main --tags
-```
+There is nothing to run. On every push to `main`,
+[release-please](https://github.com/googleapis/release-please) opens or
+updates a pull request titled "chore(main): release X.Y.Z" that contains the
+version bump and the changelog entries for everything merged since the last
+release.
 
-The tag triggers the release workflow: checks, build, PyPI publish via Trusted
-Publishing, then a GitHub release. The workflow refuses to publish if the tag
-does not match the version in `pyproject.toml`.
+Merging that pull request:
+
+1. bumps the version in `pyproject.toml` and `src/gst_validator/__init__.py`,
+2. writes `CHANGELOG.md`,
+3. tags `vX.Y.Z` and creates the GitHub release,
+4. builds, publishes to PyPI via Trusted Publishing, and attaches the sdist
+   and wheel to the release.
+
+To hold a release back, leave the pull request unmerged; it keeps collecting
+changes.

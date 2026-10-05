@@ -501,38 +501,13 @@ on the dummy PAN `AAACR5055K`; they are checksum-valid but belong to nobody.
 
 ## Releasing
 
-CI runs lint, both type checkers, the tests and a build on every push and PR.
-
-To publish a release:
-
-```bash
-uv version --bump patch        # or minor / major
-git commit -am "Release v$(uv version --short)"
-git tag "v$(uv version --short)"
-git push origin main --tags
-```
-
-The tag triggers `.github/workflows/release.yml`, which re-runs the checks,
-builds the sdist and wheel, publishes to PyPI and creates a GitHub release
-with generated notes. The workflow refuses to publish if the tag does not
-match the version in `pyproject.toml`.
-
-Publishing uses [PyPI Trusted Publishing](https://docs.pypi.org/trusted-publishers/)
-(OIDC, no stored secret). One-time setup on PyPI, under
-*Your projects -> Publishing* (or *Pending publishers* for a name that does
-not exist yet):
-
-| Field | Value |
-|---|---|
-| PyPI project name | `gst-validator` |
-| Owner | `rahulgurujala` |
-| Repository name | `gst-validator` |
-| Workflow name | `release.yml` |
-| Environment name | `pypi` |
-
-If a `PYPI_API_TOKEN` repository secret is set instead, the workflow uses that
-and skips OIDC.
-
+Releases are automated with
+[release-please](https://github.com/googleapis/release-please). Commits on
+`main` follow [Conventional Commits](https://www.conventionalcommits.org/)
+(`feat:`, `fix:`, `portal:`, ...); a bot keeps a release pull request up to
+date with the next version number and the changelog. Merging it bumps the
+version, tags, publishes to PyPI and creates the GitHub release. Nothing is
+tagged or edited by hand. Details in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Contributing
 

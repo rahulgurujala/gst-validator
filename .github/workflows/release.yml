@@ -1,15 +1,42 @@
 name: Release
 
+# The filename and the `pypi` environment below are part of the PyPI Trusted
+# Publisher configuration. Renaming either breaks publishing.
+
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
+  # Keeps a release pull request up to date from Conventional Commits. Merging
+  # it bumps the version, writes the changelog, tags and creates the release.
+  release-please:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      released: ${{ steps.release.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v5
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
   build:
+    needs: release-please
+    if: needs.release-please.outputs.released == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release-please.outputs.tag }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@v10.2.0
@@ -17,12 +44,11 @@ jobs:
           enable-cache: true
 
       - name: Verify the tag matches the project version
-        if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          tag="${GITHUB_REF_NAME#v}"
+          tag="${{ needs.release-please.outputs.tag }}"
           version="$(uv version --short)"
-          if [ "$tag" != "$version" ]; then
-            echo "::error::tag v$tag does not match pyproject version $version"
+          if [ "${tag#v}" != "$version" ]; then
+            echo "::error::tag $tag does not match pyproject version $version"
             exit 1
           fi
 
@@ -42,7 +68,7 @@ jobs:
           path: dist/
 
   publish:
-    needs: build
+    needs: [release-please, build]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
@@ -66,19 +92,18 @@ jobs:
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
 
-  github-release:
-    needs: publish
+  attach-artifacts:
+    needs: [release-please, publish]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
-      - name: Create the GitHub release
+      - name: Attach the built files to the release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --generate-notes
+          TAG: ${{ needs.release-please.outputs.tag }}
+        run: gh release upload "$TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
