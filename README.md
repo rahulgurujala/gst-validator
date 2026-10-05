@@ -82,8 +82,9 @@ pip install gst-validator     # or plain pip
 uvx gst-validator --help      # or run it without installing
 ```
 
-Python 3.13 or newer. The only runtime dependency is
-[httpx](https://www.python-httpx.org/).
+Python 3.13 or newer. Two runtime dependencies:
+[httpx](https://www.python-httpx.org/) for the HTTP layer and
+[rich](https://rich.readthedocs.io/) for the CLI output.
 
 ## Quick start
 
@@ -109,10 +110,23 @@ gst-validator [-h] [--offline] [--json] [--details-only] [--raw]
 
 ```bash
 $ gst-validator 27AAACR5055K1Z7 --offline
-27AAACR5055K1Z7 is valid (state 27, PAN AAACR5055K)
+valid 27AAACR5055K1Z7
+state code             27
+state name             Maharashtra
+pan                    AAACR5055K
+entity type            Company
+registration sequence  1
 
 $ gst-validator 27AAACR5055K1Z7 --offline --json
-{"gstin": "27AAACR5055K1Z7", "state_code": "27", "pan": "AAACR5055K"}
+{
+  "gstin": "27AAACR5055K1Z7",
+  "valid": true,
+  "state_code": "27",
+  "state_name": "Maharashtra",
+  "pan": "AAACR5055K",
+  "entity_type": "Company",
+  "registration_sequence": "1"
+}
 ```
 
 Use this in CI, in a pre-commit check, or to screen input before spending a
@@ -144,7 +158,11 @@ gst-validator 27AAACR5055K1Z7 --raw      # the portal's body verbatim, nothing d
 
 `--json` is the one to parse: stable key names, `null` instead of `"NA"`,
 dates as `2025-09-15`. `--raw` is for debugging what the portal actually sent.
-Both go to stdout; progress messages go to stderr, so piping is safe:
+
+The human-facing table is rendered with [rich](https://rich.readthedocs.io/),
+but `--json` and `--raw` are written as plain text with no styling or
+wrapping, so they stay byte-exact. Results go to stdout and progress messages
+to stderr, which makes piping safe:
 
 ```bash
 gst-validator 27AAACR5055K1Z7 --json | jq -r '.legal_name, .principal_address'
@@ -158,9 +176,16 @@ data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAALY...
 captcha text: 784077
 ```
 
-The data URI goes to stdout. Paste it into a browser address bar, drop it in
-an `<img src=...>`, or hand it to a solving service. The process keeps the
-portal session open while it waits on stdin, which is what makes this work.
+The data URI and the prompt go to **stderr**, never stdout, so `--json` and
+`--raw` stay pipeable while you solve the captcha. Paste the URI into a
+browser address bar, drop it in an `<img src=...>`, or hand it to a solving
+service. The process keeps the portal session open while it waits on stdin,
+which is what makes this work.
+
+```bash
+gst-validator 27AAACR5055K1Z7 --json --captcha-base64 > taxpayer.json
+# the URI and the prompt appear on your terminal; only JSON reaches the file
+```
 
 ### Other flags
 
@@ -169,6 +194,7 @@ gst-validator 27AAACR5055K1Z7 --details-only   # skip the captcha-free extras
 gst-validator 27AAACR5055K1Z7 --refresh        # ignore the cache, force a fresh lookup
 gst-validator 27AAACR5055K1Z7 --keep-captcha   # keep the image file for inspection
 gst-validator 27AAACR5055K1Z7 --captcha-path ./c.png   # write it where you want
+gst-validator 27AAACR5055K1Z7 --no-color               # plain text, no styling
 ```
 
 Also runnable as a module: `python -m gst_validator 27AAACR5055K1Z7`.
@@ -463,7 +489,7 @@ Shortcuts: `gstin`, `name`, `is_active`, `as_dict()`.
 | `state_jurisdiction` | `stj`, `stjCd` | `Jurisdiction` |
 | `einvoice_enabled` | `einvoiceStatus` | `bool \| None` |
 | `is_field_visit_conducted` | `isFieldVisitConducted` | `bool \| None` |
-| `core_business_activity` | `ntcrbs` (code expanded) | `str \| None` |
+| `core_business_activity` | `ntcrbs` (code expanded: Manufacturer, Trader, Service Provider and Others) | `str \| None` |
 | `aadhaar_verified` | `adhrVFlag` | `bool \| None` |
 | `aadhaar_verified_on` | `adhrVdt` | `datetime.date \| None` |
 | `ekyc_status` | `ekycVFlag` | `str \| None` |
@@ -507,7 +533,7 @@ supported route; this package drives the public, captcha-gated search.
 
 ```bash
 uv sync              # install, including dev dependencies
-uv run pytest        # 46 tests, fully offline via httpx.MockTransport
+uv run pytest        # 60 tests, fully offline via httpx.MockTransport
 uv run mypy          # strict
 uv run pyright       # strict
 uv run ruff check .
@@ -551,6 +577,9 @@ If the portal changes shape, that is a
 [portal change issue](https://github.com/rahulgurujala/gst-validator/issues/new?template=portal_change.yml);
 include the output of `--raw` with the identifying values replaced.
 
+Everyone taking part is expected to follow the
+[Code of Conduct](CODE_OF_CONDUCT.md).
+
 Security reports go through
 [private advisories](https://github.com/rahulgurujala/gst-validator/security/advisories/new),
 not public issues. See [SECURITY.md](SECURITY.md).
@@ -559,6 +588,7 @@ not public issues. See [SECURITY.md](SECURITY.md).
 
 - [PyPI](https://pypi.org/project/gst-validator/)
 - [Changelog](CHANGELOG.md)
+- [Contributing](CONTRIBUTING.md) · [Code of Conduct](CODE_OF_CONDUCT.md) · [Security policy](SECURITY.md)
 - [Official GST developer portal](https://developer.gst.gov.in/) - the licensed GSP route for unattended, high-volume use
 
 ## License
