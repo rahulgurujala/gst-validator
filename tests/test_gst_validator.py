@@ -7,7 +7,7 @@ import json
 import subprocess
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from datetime import date
 from importlib import metadata
 from pathlib import Path
@@ -586,6 +586,7 @@ class TestOfflineOutput:
             "pan": "ABCFE1234F",
             "entity_type": "Firm / LLP",
             "registration_sequence": "1",
+            "registration_type": "Regular",
         }
 
 
@@ -927,3 +928,105 @@ class TestManufacturerPayload:
         assert "adadr" not in manufacturer.raw
         assert manufacturer.principal_address is not None
         assert not manufacturer.principal_address.is_empty
+
+
+class TestRegistrationType:
+    """The 14th character is Z only for ordinary registrations."""
+
+    # Same PAN and state, differing only in the 14th character, each with its
+    # own correct check digit.
+    REGULAR = "27ABCFE1234F1ZW"
+    TDS = "27ABCFE1234F1D5"
+    TCS = "27ABCFE1234F1C7"
+    UNKNOWN = "27ABCFE1234F1QE"
+
+    def test_tds_and_tcs_registrations_are_valid(self) -> None:
+        for value, label in (
+            (self.REGULAR, "Regular"),
+            (self.TDS, "TDS deductor"),
+            (self.TCS, "TCS collector"),
+        ):
+            gstin = GSTIN.parse(value)
+            assert gstin.registration_type == label
+            assert gstin.is_regular is (value == self.REGULAR)
+
+    def test_checksum_still_guards_the_relaxed_position(self) -> None:
+        with pytest.raises(InvalidGSTINError, match="checksum"):
+            GSTIN(self.TDS[:-1] + "A")
+
+    def test_unknown_type_character_is_not_labelled(self) -> None:
+        gstin = GSTIN.parse(self.UNKNOWN)
+        assert gstin.registration_type is None
+        assert not gstin.is_regular
+
+    def test_offline_json_reports_it(self, capsys: pytest.CaptureFixture[str]) -> None:
+        assert main([self.TDS, "--offline", "--json"]) == 0
+        assert json.loads(capsys.readouterr().out)["registration_type"] == "TDS deductor"
+
+
+class TestAsyncClientSurface:
+    """The async client mirrors the sync one, so it needs the same cover."""
+
+    @staticmethod
+    def _run[T](coro: Callable[[], Coroutine[None, None, T]]) -> T:
+        return asyncio.run(coro())
+
+    def test_fetch_captcha(self) -> None:
+        async def go() -> Captcha:
+            async with AsyncGSTClient(transport=_transport(), cache=TTLCache()) as client:
+                return await client.fetch_captcha()
+
+        assert self._run(go).content == b"\x89PNG-bytes"
+
+    def test_captcha_failure_is_wrapped(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(503)
+
+        async def go() -> None:
+            async with AsyncGSTClient(
+                transport=httpx.MockTransport(handler), cache=TTLCache()
+            ) as client:
+                await client.fetch_captcha()
+
+        with pytest.raises(CaptchaError):
+            self._run(go)
+
+    def test_cache_hit_skips_the_network(self) -> None:
+        calls = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal calls
+            if request.url.path.endswith("taxpayerDetails"):
+                calls += 1
+            return httpx.Response(200, json=PAYLOAD)
+
+        cache = TTLCache()
+
+        async def go() -> TaxpayerDetails | None:
+            async with AsyncGSTClient(
+                transport=httpx.MockTransport(handler), cache=cache
+            ) as client:
+                await client.fetch_details(VALID_GSTIN, "1a2b3")
+                await client.fetch_details(VALID_GSTIN, "ignored")
+                return client.cached(VALID_GSTIN)
+
+        assert self._run(go) is not None
+        assert calls == 1
+
+    def test_lookup_failure_is_wrapped(self) -> None:
+        async def go() -> None:
+            async with AsyncGSTClient(transport=_transport(httpx.Response(503))) as client:
+                await client.fetch_details(VALID_GSTIN, "1a2b3", refresh=True)
+
+        with pytest.raises(TaxpayerLookupError):
+            self._run(go)
+
+    def test_captcha_free_endpoints(self) -> None:
+        async def go() -> tuple[int, int, int]:
+            async with AsyncGSTClient(transport=_transport(), cache=TTLCache()) as client:
+                goods = await client.fetch_goods_and_services(VALID_GSTIN)
+                years = await client.fetch_financial_years(VALID_GSTIN)
+                prefs = await client.fetch_filing_preferences(VALID_GSTIN)
+                return len(goods), len(years), len(prefs)
+
+        assert self._run(go) == (1, 2, 2)

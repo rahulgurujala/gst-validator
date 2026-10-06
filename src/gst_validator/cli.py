@@ -133,6 +133,7 @@ def _offline_fields(gstin: GSTIN) -> dict[str, object]:
         "pan": gstin.pan,
         "entity_type": gstin.entity_type,
         "registration_sequence": gstin.registration_sequence,
+        "registration_type": gstin.registration_type,
     }
 
 

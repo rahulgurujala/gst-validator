@@ -25,7 +25,11 @@ __all__ = [
 type StrPath = str | os.PathLike[str]
 """Anything :func:`open` accepts: a ``str`` or a :class:`pathlib.Path`."""
 
-_GSTIN_PATTERN: Final = re.compile(r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$")
+# The 14th character is "Z" for an ordinary registration, but "D" for a TDS
+# deductor under section 51 and "C" for a TCS collector under section 52, so
+# it cannot be pinned to "Z": that rejected valid government and e-commerce
+# registrations outright. The checksum remains the real guard against typos.
+_GSTIN_PATTERN: Final = re.compile(r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z][A-Z][0-9A-Z]$")
 _CHECKSUM_ALPHABET: Final = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 _DATE_FORMATS: Final = ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d")
 
@@ -82,6 +86,13 @@ _STATE_NAMES: Final[dict[str, str]] = {
 _CORE_BUSINESS: Final[dict[str, str]] = {
     "SPO": "Service Provider and Others",
     "MFT": "Manufacturer",
+}
+
+# 14th GSTIN character: the kind of registration.
+_REGISTRATION_TYPES: Final[dict[str, str]] = {
+    "Z": "Regular",
+    "D": "TDS deductor",
+    "C": "TCS collector",
 }
 
 # 4th PAN character encodes the holder type.
@@ -192,6 +203,16 @@ class GSTIN:
     def registration_sequence(self) -> str:
         """13th character: the Nth registration of this PAN in this state."""
         return self.value[12]
+
+    @property
+    def registration_type(self) -> str | None:
+        """14th character: "Z" ordinarily, "D" for TDS, "C" for TCS."""
+        return _REGISTRATION_TYPES.get(self.value[13])
+
+    @property
+    def is_regular(self) -> bool:
+        """False for a TDS deductor or a TCS collector registration."""
+        return self.value[13] == "Z"
 
     def __str__(self) -> str:
         return self.value
