@@ -25,8 +25,8 @@ from rich.theme import Theme
 from .bulk import RESULT_KEYS, ValidationResult, enrich_many, validate_many
 from .cache import DiskCache, NullCache, TaxpayerCache
 from .client import GSTClient
-from .exceptions import GSTValidatorError
-from .models import GSTIN, TaxpayerProfile
+from .exceptions import GSTValidatorError, InvalidPANError
+from .models import GSTIN, Registration, TaxpayerProfile, validate_pan
 
 __all__ = ["main"]
 
@@ -65,6 +65,9 @@ examples:
 
   one full lookup, which asks you to solve a captcha
     gst-validator 27AAACR5055K1Z7
+
+  every registration a company holds, found by its PAN
+    gst-validator --pan AAACR5055K
 
   feed a pipeline
     gst-validator 27AAACR5055K1Z7 --json | jq -r .legal_name
@@ -133,6 +136,12 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         default=None,
         help="write the result to a file instead of stdout",
+    )
+    parser.add_argument(
+        "--pan",
+        metavar="PAN",
+        default=None,
+        help="list every GSTIN registered under this PAN (costs one captcha)",
     )
     parser.add_argument(
         "--enrich",
@@ -445,8 +454,13 @@ def _lookup_many(gstins: Sequence[GSTIN], args: argparse.Namespace) -> list[Taxp
     return profiles
 
 
-def _lookup(client: GSTClient, gstin: GSTIN, args: argparse.Namespace) -> TaxpayerProfile:
-    """Fetch a captcha, obtain its text, then look the GSTIN up."""
+@contextmanager
+def _solved_captcha(client: GSTClient, args: argparse.Namespace, label: str) -> Generator[str]:
+    """Fetch a captcha, hand it over however was asked for, yield the answer.
+
+    Shared by the GSTIN lookup and the PAN search, which differ only in what
+    they do with the text. ``label`` names the temporary image file.
+    """
     captcha = client.fetch_captcha()
     written: Path | None = None
     try:
@@ -456,21 +470,80 @@ def _lookup(client: GSTClient, gstin: GSTIN, args: argparse.Namespace) -> Taxpay
             err.print(captcha.data_uri, soft_wrap=True, markup=False, highlight=False)
         else:
             written = Path(
-                args.captcha_path or Path(tempfile.gettempdir()) / f"{gstin}-captcha.png"
+                args.captcha_path or Path(tempfile.gettempdir()) / f"{label}-captcha.png"
             )
             captcha.save(written)
             err.print(
                 Text.assemble(("captcha image written to ", "label"), (str(written), "accent"))
             )
         err.print(Text("captcha text: ", style="accent"), end="")
-        solved = input()
-        if args.details_only:
-            return TaxpayerProfile(details=client.fetch_details(gstin, solved, refresh=True))
-        return client.fetch_profile(gstin, solved, refresh=True)
+        yield input()
     finally:
         # The image is single-use: discard it once the text has been read.
         if written is not None and not args.keep_captcha:
             written.unlink(missing_ok=True)
+
+
+def _lookup(client: GSTClient, gstin: GSTIN, args: argparse.Namespace) -> TaxpayerProfile:
+    """Fetch a captcha, obtain its text, then look the GSTIN up."""
+    with _solved_captcha(client, args, gstin.value) as solved:
+        if args.details_only:
+            return TaxpayerProfile(details=client.fetch_details(gstin, solved, refresh=True))
+        return client.fetch_profile(gstin, solved, refresh=True)
+
+
+def _registrations_table(rows: Sequence[Registration]) -> Table:
+    """One line per registration, which is how a PAN result is read."""
+    table = Table(show_header=True, header_style="label", box=None, pad_edge=False)
+    table.add_column("gstin", no_wrap=True)
+    table.add_column("status", no_wrap=True)
+    table.add_column("state", overflow="fold")
+    table.add_column("type", overflow="fold")
+    for row in rows:
+        number = row.number
+        style = "ok" if row.is_active else "warn"
+        table.add_row(
+            Text(row.gstin),
+            Text(row.status or "", style=style),
+            Text((number.state_name if number else None) or row.state_code or ""),
+            Text((number.registration_type if number else None) or ""),
+        )
+    return table
+
+
+def _emit_registrations(rows: Sequence[Registration], fmt: str) -> None:
+    """Render a PAN result in the requested format."""
+    payloads = [row.as_dict() for row in rows]
+    match fmt:
+        case "csv":
+            _write_csv(payloads)
+        case "jsonl":
+            for payload in payloads:
+                print(json.dumps(payload, ensure_ascii=False))
+        case "json" | "raw":
+            print(json.dumps(payloads, indent=2, ensure_ascii=False))
+        case _:
+            out.print(_registrations_table(rows))
+
+
+def _run_pan(args: argparse.Namespace, fmt: str) -> int:
+    """Look a PAN up and list every registration held under it."""
+    try:
+        pan = validate_pan(args.pan)
+    except InvalidPANError as error:
+        err.print(Text.assemble(("invalid PAN ", "err"), str(error)))
+        return 2
+    with GSTClient(cache=_cache_for(args)) as client:
+        try:
+            with _solved_captcha(client, args, pan) as solved:
+                rows = client.fetch_registrations_by_pan(pan, solved)
+        except GSTValidatorError as error:
+            err.print(Text.assemble(("PAN lookup failed: ", "err"), str(error)))
+            return 1
+    if not rows:
+        err.print(Text(f"no registrations found for {pan}", style="warn"))
+    _emit_registrations(rows, fmt)
+    return 0
 
 
 def _read_gstins(values: Sequence[str]) -> Iterator[str]:
@@ -627,7 +700,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _dispatch(args: argparse.Namespace, fmt: str) -> int:
-    """Offline work goes through the bulk path; a lookup opens one session."""
+    """PAN search is its own mode; offline work goes through the bulk path."""
+    if args.pan:
+        return _run_pan(args, fmt)
     if args.offline or args.column or args.enrich:
         return _run_bulk(args, fmt)
 

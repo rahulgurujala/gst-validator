@@ -30,6 +30,10 @@ src/gst_validator/
   exceptions.py  the one exception tree
   _parsing.py    shared normalisers for the portal's loose JSON
   models.py      re-exports the types, so older imports keep working
+
+scripts/
+  check_state_master.py  diffs the state table against the portal's own
+                         master; a maintainer tool, run before a release
 ```
 
 Tests mirror that: `test_gstin.py`, `test_taxpayer.py`, `test_client.py`,
@@ -52,6 +56,12 @@ uv run pytest -q             # tests
 All of these must pass. CI runs the same commands on every push and pull
 request, and installs with `uv sync --locked` so a stale lockfile fails there
 rather than silently resolving to something else.
+
+The state table in `gstin.py` is hardcoded so that decoding stays offline.
+It goes stale when the portal changes - Ladakh was added in 2019, and Dadra
+and Nagar Haveli merged with Daman and Diu in 2020 - so run
+`uv run scripts/check_state_master.py` before a release. It is not a test,
+because tests never touch the network.
 
 If you change dependencies, run `uv lock` and commit `uv.lock` with the
 change. You do not need to touch it for a release: the release workflow

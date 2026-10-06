@@ -14,6 +14,7 @@ __all__ = [
     "FinancialYear",
     "GoodsOrService",
     "Jurisdiction",
+    "Registration",
     "TaxpayerDetails",
     "TaxpayerProfile",
 ]
@@ -427,3 +428,82 @@ class TaxpayerProfile:
 
     def __str__(self) -> str:
         return str(self.details)
+
+
+# The three keys the PAN search sends per row. Anything else lands in
+# Registration.unmapped, so a new portal field is visible rather than lost.
+_REGISTRATION_KEYS: Final = frozenset({"gstin", "authStatus", "stateCd"})
+
+
+@dataclass(frozen=True, slots=True)
+class Registration:
+    """One GSTIN held under a PAN, as the PAN search returns it.
+
+    Deliberately not a :class:`TaxpayerDetails`: the PAN search answers with
+    three fields, not twenty-three, so that model would be almost entirely
+    ``None`` and its ``raw`` would claim to be a taxpayer payload it is not.
+
+    There is no ``raw`` here either. ``TaxpayerDetails`` keeps one because the
+    disk cache round-trips it and must survive the models growing; nothing
+    caches a registration row, every field it sends is modelled below, and
+    :attr:`unmapped` already carries anything new.
+    """
+
+    gstin: str
+    """The registration number, as the portal spelled it."""
+
+    status: str | None = None
+    """``authStatus``. Seen live as "Active" and "Inactive"."""
+
+    state_code: str | None = None
+    """``stateCd``, kept as sent rather than derived, so that a disagreement
+    with the number itself stays visible instead of one side silently winning."""
+
+    unmapped: dict[str, Any] = field(default_factory=dict[str, Any])
+    """Keys this class does not model, so a portal change is never swallowed."""
+
+    @classmethod
+    def from_payload(cls, payload: dict[str, Any]) -> Self:
+        """Build from one ``gstinResList`` entry."""
+        return cls(
+            gstin=as_text(payload.get("gstin")) or "",
+            status=as_text(payload.get("authStatus")),
+            state_code=as_text(payload.get("stateCd")),
+            unmapped={
+                key: value for key, value in payload.items() if key not in _REGISTRATION_KEYS
+            },
+        )
+
+    @property
+    def number(self) -> GSTIN | None:
+        """The GSTIN as a value object, or ``None`` if the portal echoed junk.
+
+        Matches :attr:`TaxpayerDetails.number`, and means one malformed row
+        cannot take down a response listing twenty-five good ones.
+        """
+        try:
+            return GSTIN.parse(self.gstin)
+        except InvalidGSTINError:
+            return None
+
+    @property
+    def is_active(self) -> bool:
+        """True only for status "Active", as :attr:`TaxpayerDetails.is_active`."""
+        return (self.status or "").casefold() == "active"
+
+    def as_dict(self) -> dict[str, Any]:
+        """Flat and JSON-ready, with what the number itself decodes folded in."""
+        number = self.number
+        return {
+            "gstin": self.gstin,
+            "status": self.status,
+            "is_active": self.is_active,
+            "state_code": self.state_code,
+            "state_name": number.state_name if number else None,
+            "registration_sequence": number.registration_sequence if number else None,
+            "registration_type": number.registration_type if number else None,
+            "extra": self.unmapped,
+        }
+
+    def __str__(self) -> str:
+        return f"{self.gstin} ({self.status or 'unknown status'})"

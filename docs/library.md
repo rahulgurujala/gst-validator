@@ -17,6 +17,8 @@ from gst_validator import (
     GoodsOrService,
     FinancialYear,
     FilingPreference,
+    Registration,
+    validate_pan,
     validate_many,
     enrich_many,
     ValidationResult,
@@ -27,6 +29,7 @@ from gst_validator import (
     TaxpayerCache,
     GSTValidatorError,
     InvalidGSTINError,
+    InvalidPANError,
     CaptchaError,
     TaxpayerLookupError,
 )
@@ -51,6 +54,7 @@ gstin.state_code  # '27'
 gstin.state_name  # 'Maharashtra'
 gstin.pan  # 'AAACR5055K'
 gstin.entity_type  # 'Company'   (4th PAN character)
+gstin.is_union_territory  # False  (True for Chandigarh, Ladakh, and four more)
 gstin.registration_sequence  # '1'         (Nth registration of this PAN in this state)
 
 try:
@@ -107,7 +111,45 @@ match GSTIN.parse(value).layout:
 Properties that do not apply to the layout in hand return `None` rather than
 raising, and `is_regular`, `is_non_resident` and `is_uin` remain as shortcuts.
 
-## 4. The full lookup (one captcha)
+## 4. Every registration a company holds (one captcha)
+
+A company registers once per state, all against the same PAN. The PAN search
+turns one into the whole set:
+
+```python
+from gst_validator import GSTClient
+
+with GSTClient() as client:
+    captcha = client.fetch_captcha()
+    solved = input(f"solve this: {captcha.data_uri}\n> ")
+    for reg in client.fetch_registrations_by_pan("AAACR5055K", solved):
+        print(reg.gstin, reg.status, reg.number.state_name if reg.number else "")
+    # 24AAACR5055K2ZC Inactive Gujarat
+    # 14AAACR5055K1ZE Active   Manipur
+```
+
+Since `GSTIN.pan` is already on every number you parse, the two chain
+directly - one GSTIN in, a company's whole footprint out:
+
+```python
+pan = GSTIN.parse("27AAACR5055K1Z7").pan
+registrations = client.fetch_registrations_by_pan(pan, solved)
+active = [r for r in registrations if r.is_active]
+```
+
+The shape is checked before the request, so a typo never costs a captcha:
+
+```python
+from gst_validator import InvalidPANError, validate_pan
+
+validate_pan("  aaacr5055k ")  # 'AAACR5055K'
+validate_pan("27AAACR5055K1Z7")  # raises InvalidPANError - that is a GSTIN
+```
+
+The captcha is single-use: a second PAN needs a second one. A PAN with no
+registrations comes back as an empty tuple, which is an answer, not an error.
+
+## 5. The full lookup (one captcha)
 
 The captcha is bound to the client's cookies, so fetch and submit must happen
 on the **same instance**:
@@ -127,7 +169,7 @@ profile.as_dict()  # everything, JSON-ready
 `fetch_details()` instead of `fetch_profile()` if you only want the
 captcha-gated part.
 
-## 5. Web app: captcha to the browser, text back
+## 6. Web app: captcha to the browser, text back
 
 The pattern the original Flask app was reaching for: keep one client per
 pending lookup, keyed by a session id:
@@ -169,7 +211,7 @@ The front end renders `image` straight into `<img src="{{ image }}">`, since it 
 already a `data:` URI. Give `pending` an expiry; portal sessions do not live
 forever, and an abandoned entry leaks a connection pool.
 
-## 6. Checking many at once
+## 7. Checking many at once
 
 ```python
 from gst_validator import validate_many, enrich_many
@@ -193,7 +235,7 @@ dataframe.
 per-row `enrichment_error` instead of failing the batch. The captcha-gated
 lookup is deliberately not part of it, since each one costs a solved image.
 
-## 7. Async
+## 8. Async
 
 Same API, `await` and `async with`:
 
@@ -211,7 +253,7 @@ async def codes(gstin: str) -> tuple[str, ...]:
 asyncio.run(codes("27AAACR5055K1Z7"))
 ```
 
-## 8. Caching
+## 9. Caching
 
 Each live lookup costs a human-solved captcha, so successful results are
 cached in a process-wide `TTLCache` (24 h, 512 entries, LRU, thread-safe).
@@ -285,11 +327,12 @@ concurrent lookups. The *cache* is the shared piece; clients stay cheap and
 short-lived. The cache stores `.raw`, so a cached entry survives a model
 upgrade.
 
-## 9. Error handling
+## 10. Error handling
 
 ```
 GSTValidatorError
 ├── InvalidGSTINError   (also a ValueError)  .value, .reason
+├── InvalidPANError     (also a ValueError)  .value, .reason
 ├── CaptchaError                             captcha could not be fetched
 └── TaxpayerLookupError                      .code = the portal's errorCode
 ```
@@ -327,6 +370,24 @@ everything this package raises; `httpx` errors are wrapped, never leaked.
 | `filing_preferences` | `tuple[FilingPreference, ...]` | `taxpayerProfileDetails` |
 
 Shortcuts: `gstin`, `name`, `is_active`, `as_dict()`.
+
+### `Registration`
+
+From the PAN search. Three portal fields, all modelled - deliberately no
+`raw`: nothing caches a registration row, so a second copy of the body would
+be weight without a job.
+
+| Attribute | Portal key | Type |
+|---|---|---|
+| `gstin` | `gstin` | `str` |
+| `number` | (derived) | `GSTIN \| None`, `None` if the portal echoed junk |
+| `status` | `authStatus` | `str \| None` ("Active", "Inactive") |
+| `is_active` | (derived) | `bool`, same rule as `TaxpayerDetails.is_active` |
+| `state_code` | `stateCd` | `str \| None`, kept as sent rather than derived |
+| `unmapped` | everything else | `dict[str, Any]` |
+
+`as_dict()` adds `state_name`, `registration_sequence` and
+`registration_type`, decoded from the number itself.
 
 ### `TaxpayerDetails`
 

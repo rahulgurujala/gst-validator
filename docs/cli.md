@@ -9,7 +9,7 @@ Run `gst-validator --help` for the full flag list with worked examples.
 ```
 usage: gst-validator [-h] [--version] [--offline]
                      [-f {table,json,jsonl,csv,raw}] [--json] [--column NAME]
-                     [-o PATH] [--enrich] [--details-only] [--raw]
+                     [-o PATH] [--pan PAN] [--enrich] [--details-only] [--raw]
                      [--captcha-path CAPTCHA_PATH] [--captcha-base64]
                      [--no-cache] [--clear-cache] [--refresh] [--keep-captcha]
                      [--no-color]
@@ -107,6 +107,41 @@ gst-validator 27AAACR5055K1Z7 --json --captcha-base64 > taxpayer.json
 # the URI and the prompt appear on your terminal; only JSON reaches the file
 ```
 
+## Every registration a company holds
+
+A company registers once per state, all on the same PAN. `--pan` lists them
+all, which is the quickest way to find a supplier's other GSTINs:
+
+```bash
+$ gst-validator --pan AAACR5055K
+captcha image written to /tmp/AAACR5055K-captcha.png   # stderr
+captcha text: 784077
+gstin            status    state         type
+24AAACR5055K2ZC  Inactive  Gujarat       Regular
+14AAACR5055K1ZE  Active    Manipur       Regular
+32AAACR5055K1ZG  Active    Kerala        Regular
+...
+```
+
+The PAN is checked for shape *before* a captcha is fetched, so a typo costs
+you nothing. One captcha covers one PAN; the portal makes each one single-use,
+so a second PAN needs a second captcha.
+
+Every output format works, and each row carries the state and registration
+type decoded from the number itself:
+
+```bash
+gst-validator --pan AAACR5055K --json        # always a list, even for one row
+gst-validator --pan AAACR5055K --format csv -o registrations.csv
+```
+
+The PAN of a GSTIN you already hold is on the object, so the two chain:
+
+```bash
+pan=$(gst-validator 27AAACR5055K1Z7 --offline --json | jq -r .pan)
+gst-validator --pan "$pan" --json
+```
+
 ## Validating many at once
 
 Offline validation needs no captcha, so a whole spreadsheet column costs
@@ -202,6 +237,7 @@ Also runnable as a module: `python -m gst_validator 27AAACR5055K1Z7`.
 | `--json` / `--raw` | Shorthands for `--format json` / `--format raw` |
 | `-o`, `--output PATH` | Write the result to a file instead of stdout |
 | `--column NAME` | Read the input as CSV and take GSTINs from this column |
+| `--pan PAN` | List every GSTIN registered under this PAN; costs one captcha |
 | `--enrich` | Add the captcha-free portal data to each row; needs the network, even alongside `--offline` |
 | `--details-only` | Skip the captcha-free extras on a full lookup |
 | `--refresh` | Ignore any cached result and look up afresh |

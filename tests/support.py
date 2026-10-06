@@ -1,6 +1,8 @@
 """Shared constants, captured payloads and helpers for the test modules."""
 
+import json
 from collections.abc import Callable
+from pathlib import Path
 
 import httpx
 
@@ -57,6 +59,12 @@ FINYEAR_PAYLOAD: dict[str, object] = {
     "status": 1,
     "data": [{"year": "2025-2026", "value": "2025"}, {"year": "2026-2027", "value": "2026"}],
 }
+# A real capture: every GSTIN Reliance Industries holds under one PAN, as the
+# PAN search returned it. Public corporate registrations, trimmed to five rows.
+PAN = "AAACR5055K"
+REGISTRATIONS_PAYLOAD: dict[str, object] = json.loads(
+    (Path(__file__).parent / "fixtures" / "registrations_by_pan.json").read_text()
+)
 PROFILE_PAYLOAD: dict[str, object] = {
     "status": 1,
     "data": {
@@ -82,6 +90,8 @@ def transport(details: httpx.Response | None = None) -> httpx.MockTransport:
                 return httpx.Response(200, json=FINYEAR_PAYLOAD)
             case "/services/api/search/taxpayerProfileDetails":
                 return httpx.Response(200, json=PROFILE_PAYLOAD)
+            case "/services/api/get/gstndtls":
+                return httpx.Response(200, json=REGISTRATIONS_PAYLOAD)
             case _:  # pragma: no cover - guards against path typos
                 return httpx.Response(404)
 

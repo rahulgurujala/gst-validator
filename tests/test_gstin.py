@@ -274,41 +274,41 @@ class TestUinLayout:
         assert details.unmapped == {}
 
 
+def gstin_in_state(code: str) -> GSTIN:
+    """A checksum-valid GSTIN in the given state, built on a dummy PAN."""
+    prefix = f"{code}ABCFE1234F1Z"
+    alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    total = 0
+    for position, character in enumerate(prefix):
+        product = alphabet.index(character) * (1 + position % 2)
+        total += product // 36 + product % 36
+    return GSTIN(prefix + alphabet[(36 - total % 36) % 36])
+
+
 class TestStateCodes:
     """Checked against the official master codes published on the NIC
     e-invoice portal, https://einvoice1.gst.gov.in/Others/MasterCodes
     """
 
-    @staticmethod
-    def _for_state(code: str) -> GSTIN:
-        """A checksum-valid GSTIN in the given state, built on a dummy PAN."""
-        prefix = f"{code}ABCFE1234F1Z"
-        alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        total = 0
-        for position, character in enumerate(prefix):
-            product = alphabet.index(character) * (1 + position % 2)
-            total += product // 36 + product % 36
-        return GSTIN(prefix + alphabet[(36 - total % 36) % 36])
-
     def test_every_state_code_in_use_is_named(self) -> None:
         """01-38 are the states and union territories currently issued."""
         unnamed = [
-            f"{n:02d}" for n in range(1, 39) if self._for_state(f"{n:02d}").state_name is None
+            f"{n:02d}" for n in range(1, 39) if gstin_in_state(f"{n:02d}").state_name is None
         ]
         assert unnamed == []
 
     def test_codes_outside_the_state_range(self) -> None:
-        assert self._for_state("96").state_name == "Other Countries"
-        assert self._for_state("97").state_name == "Other Territory"
+        assert gstin_in_state("96").state_name == "Other Countries"
+        assert gstin_in_state("97").state_name == "Other Territory"
 
     def test_retired_code_is_kept_for_older_registrations(self) -> None:
         """28 was Andhra Pradesh before the Telangana split."""
-        name = self._for_state("28").state_name
+        name = gstin_in_state("28").state_name
         assert name is not None
         assert "retired" in name
 
     def test_an_unassigned_code_is_not_invented(self) -> None:
-        assert self._for_state("50").state_name is None
+        assert gstin_in_state("50").state_name is None
 
     def test_codes_seen_on_real_registrations(self) -> None:
         for value, expected in (
@@ -372,3 +372,76 @@ class TestParsingRobustness:
             once = GSTIN.parse(value)
             assert GSTIN.parse(once.value) == once
             assert GSTIN.parse(str(once)) == once
+
+
+class TestUnionTerritory:
+    """The "u" flag on the portal's own state master.
+
+    Six codes carry it. Delhi and Puducherry do not, although both are union
+    territories: each has a legislature and is treated as a state for GST,
+    which is the kind of detail that gets guessed wrong.
+    """
+
+    def test_the_six_flagged_codes(self) -> None:
+        for code in ("04", "25", "26", "31", "35", "38"):
+            assert gstin_in_state(code).is_union_territory, code
+
+    def test_delhi_and_puducherry_are_not_flagged(self) -> None:
+        for code in ("07", "34"):
+            gstin = gstin_in_state(code)
+            assert gstin.state_name in ("Delhi", "Puducherry")
+            assert not gstin.is_union_territory
+
+    def test_an_ordinary_state_is_not(self) -> None:
+        assert not gstin_in_state("27").is_union_territory
+
+    def test_a_non_resident_carries_no_state_so_is_not(self) -> None:
+        gstin = GSTIN.parse("9917USA29016OS6")
+        assert gstin.state_name is None
+        assert not gstin.is_union_territory
+
+
+class TestValidatePan:
+    """A PAN search costs a captcha, so the shape is checked before spending one."""
+
+    def test_normalises_and_returns(self) -> None:
+        from gst_validator import validate_pan
+
+        assert validate_pan("  aaacr5055k ") == "AAACR5055K"
+
+    def test_rejects_anything_that_is_not_a_pan(self) -> None:
+        from gst_validator import InvalidPANError, validate_pan
+
+        for value in (
+            "",
+            "AAACR5055",
+            "AAACR5055KK",
+            "AAAC15055K",
+            "27AAACR5055K1Z7",
+            "MUMA12345B",
+        ):
+            with pytest.raises(InvalidPANError, match="PAN format"):
+                validate_pan(value)
+
+    def test_the_error_names_the_pan_not_a_gstin(self) -> None:
+        """A message saying "invalid GSTIN" would send the reader to the wrong field."""
+        from gst_validator import InvalidPANError, validate_pan
+
+        with pytest.raises(InvalidPANError) as caught:
+            validate_pan("nope")
+        assert "invalid PAN" in str(caught.value)
+        assert caught.value.value == "nope"
+        assert caught.value.reason == "does not match the PAN format"
+
+    def test_it_is_a_value_error_like_its_gstin_sibling(self) -> None:
+        from gst_validator import GSTValidatorError, InvalidPANError
+
+        assert issubclass(InvalidPANError, ValueError)
+        assert issubclass(InvalidPANError, GSTValidatorError)
+
+    def test_a_tan_is_not_a_pan(self) -> None:
+        """TAN is AAAA99999A, PAN is AAAAA9999A: the shapes must not be confused."""
+        from gst_validator import InvalidPANError, validate_pan
+
+        with pytest.raises(InvalidPANError):
+            validate_pan("MUMA12345B")

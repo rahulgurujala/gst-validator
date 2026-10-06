@@ -7,12 +7,14 @@ import httpx
 
 from .cache import DEFAULT_CACHE, TaxpayerCache
 from .exceptions import CaptchaError, TaxpayerLookupError
+from .gstin import validate_pan
 from .models import (
     GSTIN,
     Captcha,
     FilingPreference,
     FinancialYear,
     GoodsOrService,
+    Registration,
     TaxpayerDetails,
     TaxpayerProfile,
 )
@@ -54,6 +56,8 @@ class _BaseGSTClient:
     GOODS_PATH: ClassVar[str] = "/api/search/goodservice"
     FINYEAR_PATH: ClassVar[str] = "/api/dropdownfinyear"
     PROFILE_PATH: ClassVar[str] = "/api/search/taxpayerProfileDetails"
+    PAN_SEARCH_PATH: ClassVar[str] = "/searchtpbypan"
+    REGISTRATIONS_PATH: ClassVar[str] = "/api/get/gstndtls"
 
     @classmethod
     def _base_headers(cls, user_agent: str) -> dict[str, str]:
@@ -91,6 +95,16 @@ class _BaseGSTClient:
             "X-Requested-With": "XMLHttpRequest",
         }
 
+    @classmethod
+    def _pan_headers(cls) -> dict[str, str]:
+        """As :meth:`_details_headers`, but refered from the PAN search page."""
+        return {
+            "Accept": "application/json, text/plain, */*",
+            "Referer": f"{cls.BASE_URL}{cls.PAN_SEARCH_PATH}",
+            "Origin": "https://services.gst.gov.in",
+            "X-Requested-With": "XMLHttpRequest",
+        }
+
     @staticmethod
     def _as_captcha(response: httpx.Response) -> Captcha:
         media_type = response.headers.get("content-type", "image/png").split(";")[0]
@@ -106,6 +120,28 @@ class _BaseGSTClient:
         if not text:
             raise TaxpayerLookupError("captcha text must not be empty")
         return {"gstin": gstin.value, "captcha": text}
+
+    @staticmethod
+    def _pan_payload(pan: str, captcha: str) -> dict[str, str]:
+        """Validate the PAN before a captcha is spent on it."""
+        text = captcha.strip()
+        if not text:
+            raise TaxpayerLookupError("captcha text must not be empty")
+        return {"panNO": validate_pan(pan), "captcha": text}
+
+    @staticmethod
+    def _as_registrations(response: httpx.Response) -> tuple[Registration, ...]:
+        """Read ``gstinResList``; its absence is how a rejection arrives.
+
+        A PAN with no registrations answers with an empty list, so an empty
+        result is a fact rather than a failure. A rejected request carries no
+        list at all, the same way a rejected lookup carries no ``gstin``.
+        """
+        payload = _json_object(response)
+        if "gstinResList" not in payload:
+            raise _rejection(payload)
+        entries = _entries(payload.get("gstinResList"))
+        return tuple(Registration.from_payload(entry) for entry in entries)
 
     @staticmethod
     def _as_details(response: httpx.Response) -> TaxpayerDetails:
@@ -295,6 +331,23 @@ class GSTClient(_BaseGSTClient):
             filing_preferences=self.fetch_filing_preferences(number),
         )
 
+    def fetch_registrations_by_pan(self, pan: str, captcha: str) -> tuple[Registration, ...]:
+        """Every GSTIN registered under ``pan``, across all states.
+
+        Costs one captcha, solved on this same instance, exactly as
+        :meth:`fetch_details` does. The captcha is single-use: a second call
+        needs a fresh one.
+        """
+        payload = self._pan_payload(pan, captcha)
+        try:
+            response = self._client.post(
+                self.REGISTRATIONS_PATH, json=payload, headers=self._pan_headers()
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as error:
+            raise TaxpayerLookupError(f"PAN lookup failed: {error}") from error
+        return self._as_registrations(response)
+
     def _get(self, path: str, gstin: GSTIN | str, **params: str) -> httpx.Response:
         """GET a captcha-free endpoint, opening a portal session if needed."""
         number = gstin if isinstance(gstin, GSTIN) else GSTIN.parse(gstin)
@@ -416,6 +469,22 @@ class AsyncGSTClient(_BaseGSTClient):
             financial_years=await self.fetch_financial_years(number),
             filing_preferences=await self.fetch_filing_preferences(number),
         )
+
+    async def fetch_registrations_by_pan(self, pan: str, captcha: str) -> tuple[Registration, ...]:
+        """Every GSTIN registered under ``pan``, across all states.
+
+        Costs one captcha, solved on this same instance. The captcha is
+        single-use: a second call needs a fresh one.
+        """
+        payload = self._pan_payload(pan, captcha)
+        try:
+            response = await self._client.post(
+                self.REGISTRATIONS_PATH, json=payload, headers=self._pan_headers()
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as error:
+            raise TaxpayerLookupError(f"PAN lookup failed: {error}") from error
+        return self._as_registrations(response)
 
     async def _get(self, path: str, gstin: GSTIN | str, **params: str) -> httpx.Response:
         """GET a captcha-free endpoint, opening a portal session if needed."""

@@ -72,6 +72,7 @@ sees `datetime.date`, `None` and exceptions.
 |---|---|
 | **Validates offline** | Format *and* mod-36 checksum, plus state, PAN or TAN, entity and registration type decoded from the number. No network, no rate limit |
 | **Knows every layout** | Ordinary, TDS deductor, TCS collector, UIN (UN bodies and embassies) and the separate one used by non-resident online-service providers |
+| **Finds every registration** | One PAN gives you a company's GSTIN in every state it operates in, with each one's status |
 | **Bulk by default** | A CSV column, a file of GSTINs or stdin; CSV, JSON, JSON Lines or table out |
 | **Typed objects** | Dates parsed, `"NA"` normalised, nothing silently dropped, `py.typed` shipped |
 | **Captcha, your way** | Raw bytes, base64 or a `data:` URI, so a browser, a person or a service can solve it |
@@ -106,6 +107,12 @@ Look one up properly, solving a captcha once:
 
 ```bash
 gst-validator 27AAACR5055K1Z7 --json | jq -r .legal_name
+```
+
+List every GSTIN a company holds, found by its PAN:
+
+```bash
+gst-validator --pan AAACR5055K --json
 ```
 
 From Python:

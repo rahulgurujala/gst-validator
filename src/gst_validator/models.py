@@ -5,13 +5,14 @@ The types live in focused modules now; this one re-exports them so that
 """
 
 from .captcha import Captcha, StrPath
-from .gstin import GSTIN, GSTINLayout
+from .gstin import GSTIN, GSTINLayout, validate_pan
 from .taxpayer import (
     Address,
     FilingPreference,
     FinancialYear,
     GoodsOrService,
     Jurisdiction,
+    Registration,
     TaxpayerDetails,
     TaxpayerProfile,
 )
@@ -25,7 +26,9 @@ __all__ = [
     "GSTINLayout",
     "GoodsOrService",
     "Jurisdiction",
+    "Registration",
     "StrPath",
     "TaxpayerDetails",
     "TaxpayerProfile",
+    "validate_pan",
 ]

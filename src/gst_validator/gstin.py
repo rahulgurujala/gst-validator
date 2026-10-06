@@ -5,9 +5,9 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Final, Self
 
-from .exceptions import InvalidGSTINError
+from .exceptions import InvalidGSTINError, InvalidPANError
 
-__all__ = ["GSTIN", "GSTINLayout"]
+__all__ = ["GSTIN", "GSTINLayout", "validate_pan"]
 
 # The 14th character is "Z" for an ordinary registration, but "D" for a TDS
 # deductor under section 51 and "C" for a TCS collector under section 52, so
@@ -85,6 +85,14 @@ _STATE_NAMES: Final[dict[str, str]] = {
     # Also the prefix of the non-resident layout, hence GSTINLayout.NON_RESIDENT.
     "99": "Other Countries",
 }
+# Union territories, per the "u" flag on the portal's own state master
+# (https://services.gst.gov.in/master/allstates?includeCbic=true).
+#
+# Delhi (07) and Puducherry (34) are deliberately absent. Both are union
+# territories constitutionally, but both have a legislature and are treated as
+# states for GST, which is why the portal does not flag them either.
+_UNION_TERRITORIES: Final[frozenset[str]] = frozenset({"04", "25", "26", "31", "35", "38"})
+
 # 14th GSTIN character: the kind of registration.
 _REGISTRATION_TYPES: Final[dict[str, str]] = {
     "Z": "Regular",
@@ -105,6 +113,19 @@ _PAN_ENTITY_TYPES: Final[dict[str, str]] = {
     "P": "Individual",
     "T": "Trust",
 }
+
+
+def validate_pan(value: str) -> str:
+    """Normalise and validate a standalone PAN, returning the clean form.
+
+    The PAN search costs a solved captcha, so the shape is checked before one
+    is spent. Raises :class:`InvalidPANError` rather than returning a flag,
+    matching :meth:`GSTIN.parse`.
+    """
+    cleaned = value.strip().upper()
+    if not _PAN_SHAPE.fullmatch(cleaned):
+        raise InvalidPANError(value, "does not match the PAN format")
+    return cleaned
 
 
 class GSTINLayout(StrEnum):
@@ -205,6 +226,16 @@ class GSTIN:
     def state_name(self) -> str | None:
         """``None`` for a non-resident, which carries a country rather than a state."""
         return None if self.is_non_resident else _STATE_NAMES.get(self.state_code)
+
+    @property
+    def is_union_territory(self) -> bool:
+        """Whether the state code is a union territory.
+
+        ``False`` for Delhi and Puducherry, which are union territories with a
+        legislature and are treated as states for GST, and ``False`` for the
+        non-resident layout, which carries no state at all.
+        """
+        return self.state_code in _UNION_TERRITORIES
 
     @property
     def registration_year(self) -> int | None:

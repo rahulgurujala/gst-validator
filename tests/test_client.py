@@ -14,6 +14,7 @@ from gst_validator import (
     CaptchaError,
     GSTClient,
     InvalidGSTINError,
+    InvalidPANError,
     TaxpayerDetails,
     TaxpayerLookupError,
     TaxpayerProfile,
@@ -22,7 +23,9 @@ from gst_validator import (
 
 from .support import (
     GOODS_PAYLOAD,
+    PAN,
     PAYLOAD,
+    REGISTRATIONS_PAYLOAD,
     VALID_GSTIN,
     transport,
 )
@@ -337,3 +340,104 @@ class TestLegacyServiceCodes:
         # Codes are kept verbatim: a SAC is not always six digits.
         assert [item.code for item in items] == ["996511", "00440193"]
         assert all(item.is_service for item in items)
+
+
+class TestPanSearch:
+    """Every GSTIN held under one PAN. Costs a captcha, like the detail lookup."""
+
+    def test_returns_each_registration(self) -> None:
+        with GSTClient(transport=transport()) as client:
+            rows = client.fetch_registrations_by_pan(PAN, "1a2b3")
+        assert len(rows) == 7
+        assert rows[0].gstin == "24AAACR5055K2ZC"
+        assert rows[0].status == "Inactive"
+        assert {row.number.pan for row in rows if row.number} == {"AAACR5055K"}
+
+    def test_the_pan_is_normalised_before_it_is_sent(self) -> None:
+        sent: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("gstndtls"):
+                sent.update(json.loads(request.content))
+                return httpx.Response(200, json=REGISTRATIONS_PAYLOAD)
+            return httpx.Response(200, text="<html></html>")
+
+        with GSTClient(transport=httpx.MockTransport(handler)) as client:
+            client.fetch_registrations_by_pan("  aaacr5055k ", "  1a2b3  ")
+        assert sent == {"panNO": "AAACR5055K", "captcha": "1a2b3"}
+
+    def test_a_bad_pan_never_reaches_the_network(self) -> None:
+        """A captcha is a person's time: do not spend one on a typo."""
+
+        def handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover
+            raise AssertionError("should not be called")
+
+        with GSTClient(transport=httpx.MockTransport(handler)) as client:
+            with pytest.raises(InvalidPANError):
+                client.fetch_registrations_by_pan("NOPE", "1a2b3")
+
+    def test_empty_captcha_text_rejected(self) -> None:
+        with GSTClient(transport=transport()) as client, pytest.raises(TaxpayerLookupError):
+            client.fetch_registrations_by_pan(PAN, "   ")
+
+    def test_a_rejection_carries_no_list_and_raises(self) -> None:
+        """The live rejection: HTTP 200, SWEB_9000, no gstinResList at all."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("gstndtls"):
+                return httpx.Response(
+                    200, json={"url": "/", "message": None, "errorCode": "SWEB_9000"}
+                )
+            return httpx.Response(200, text="<html></html>")
+
+        with GSTClient(transport=httpx.MockTransport(handler)) as client:
+            with pytest.raises(TaxpayerLookupError, match="captcha") as caught:
+                client.fetch_registrations_by_pan(PAN, "wrong")
+        assert caught.value.code == "SWEB_9000"
+
+    def test_a_pan_with_no_registrations_is_empty_not_an_error(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("gstndtls"):
+                return httpx.Response(200, json={"gstinResList": []})
+            return httpx.Response(200, text="<html></html>")
+
+        with GSTClient(transport=httpx.MockTransport(handler)) as client:
+            assert client.fetch_registrations_by_pan(PAN, "1a2b3") == ()
+
+    def test_http_failure_is_wrapped(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(503)
+
+        with GSTClient(transport=httpx.MockTransport(handler)) as client:
+            with pytest.raises(TaxpayerLookupError, match="PAN lookup failed"):
+                client.fetch_registrations_by_pan(PAN, "1a2b3")
+
+    def test_the_request_is_refered_from_the_pan_search_page(self) -> None:
+        """The portal fingerprints clients; this endpoint has its own referer."""
+        seen: dict[str, str] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path.endswith("gstndtls"):
+                seen.update(request.headers)
+                return httpx.Response(200, json=REGISTRATIONS_PAYLOAD)
+            return httpx.Response(200, text="<html></html>")
+
+        with GSTClient(transport=httpx.MockTransport(handler)) as client:
+            client.fetch_registrations_by_pan(PAN, "1a2b3")
+        assert seen["referer"].endswith("/searchtpbypan")
+
+    def test_the_async_client_matches(self) -> None:
+        async def go() -> tuple[int, str]:
+            async with AsyncGSTClient(transport=transport(), cache=TTLCache()) as client:
+                rows = await client.fetch_registrations_by_pan(PAN, "1a2b3")
+                return len(rows), rows[1].gstin
+
+        assert asyncio.run(go()) == (7, "14AAACR5055K1ZE")
+
+    def test_the_async_client_also_validates_before_the_network(self) -> None:
+        async def go() -> None:
+            async with AsyncGSTClient(transport=transport(), cache=TTLCache()) as client:
+                await client.fetch_registrations_by_pan("NOPE", "1a2b3")
+
+        with pytest.raises(InvalidPANError):
+            asyncio.run(go())

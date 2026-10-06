@@ -3,6 +3,7 @@
 import json
 from datetime import date
 from pathlib import Path
+from typing import Any, ClassVar
 
 import pytest
 
@@ -10,6 +11,7 @@ from gst_validator import (
     GSTIN,
     Address,
     Captcha,
+    Registration,
     TaxpayerDetails,
 )
 
@@ -334,7 +336,7 @@ class TestMappedKeysStayInSync:
     """
 
     @staticmethod
-    def _keys_read() -> set[str]:
+    def _keys_read(class_name: str = "TaxpayerDetails") -> set[str]:
         import ast
         from pathlib import Path as _Path
 
@@ -342,9 +344,7 @@ class TestMappedKeysStayInSync:
 
         tree = ast.parse(_Path(module.__file__ or "").read_text())
         cls = next(
-            node
-            for node in tree.body
-            if isinstance(node, ast.ClassDef) and node.name == "TaxpayerDetails"
+            node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == class_name
         )
         fn = next(
             node
@@ -374,9 +374,125 @@ class TestMappedKeysStayInSync:
 
         assert _MAPPED_KEYS - self._keys_read() == set()
 
+    def test_the_registration_row_keys_stay_in_sync_too(self) -> None:
+        """Registration has the same contract: what it reads, it declares."""
+        from gst_validator.taxpayer import (
+            _REGISTRATION_KEYS,  # pyright: ignore[reportPrivateUsage]
+        )
+
+        assert self._keys_read("Registration") == set(_REGISTRATION_KEYS)
+
 
 class TestEchoedJunkGstin:
     def test_a_null_gstin_does_not_become_the_string_none(self) -> None:
         details = TaxpayerDetails.from_payload({"gstin": None, "lgnm": "X"})
         assert details.gstin == ""
         assert details.number is None
+
+
+class TestRegistration:
+    """The PAN search row: three portal fields, all modelled, no `raw`.
+
+    Unlike TaxpayerDetails this keeps no copy of the body. Nothing caches a
+    registration row, every key it sends has a field, and `unmapped` carries
+    anything new, so a duplicate would be weight without a job.
+    """
+
+    ROW: ClassVar[dict[str, Any]] = {
+        "gstin": "24AAACR5055K2ZC",
+        "authStatus": "Inactive",
+        "stateCd": "24",
+    }
+
+    def test_the_three_portal_fields_are_modelled(self) -> None:
+        row = Registration.from_payload(dict(self.ROW))
+        assert row.gstin == "24AAACR5055K2ZC"
+        assert row.status == "Inactive"
+        assert row.state_code == "24"
+        assert row.unmapped == {}
+
+    def test_it_keeps_no_raw_copy_of_the_body(self) -> None:
+        """The objection that drove this design: raw earns nothing here."""
+        assert not hasattr(Registration.from_payload(dict(self.ROW)), "raw")
+
+    def test_the_number_decodes_the_rest(self) -> None:
+        number = Registration.from_payload(dict(self.ROW)).number
+        assert number is not None
+        assert number.state_name == "Gujarat"
+        assert number.pan == "AAACR5055K"
+        assert number.registration_sequence == "2"
+
+    def test_is_active_matches_taxpayer_details(self) -> None:
+        active = Registration.from_payload({**self.ROW, "authStatus": "Active"})
+        assert active.is_active
+        assert not Registration.from_payload(dict(self.ROW)).is_active
+        assert not Registration.from_payload({"gstin": "x"}).is_active
+
+    def test_a_malformed_row_does_not_take_down_the_list(self) -> None:
+        """One bad GSTIN among twenty-five good ones must stay survivable."""
+        row = Registration.from_payload({"gstin": "NOPE", "authStatus": "Active"})
+        assert row.number is None
+        assert row.gstin == "NOPE"
+        assert row.as_dict()["state_name"] is None
+
+    def test_an_unknown_key_is_kept_not_dropped(self) -> None:
+        row = Registration.from_payload({**self.ROW, "newField": "surprise"})
+        assert row.unmapped == {"newField": "surprise"}
+        assert row.as_dict()["extra"] == {"newField": "surprise"}
+
+    def test_state_code_is_kept_as_sent_not_derived(self) -> None:
+        """If the portal ever disagreed with the number, both stay visible."""
+        row = Registration.from_payload({**self.ROW, "stateCd": "99"})
+        assert row.state_code == "99"
+        assert row.number is not None
+        assert row.number.state_code == "24"
+
+    def test_as_dict_is_flat_and_json_ready(self) -> None:
+        payload = Registration.from_payload(dict(self.ROW)).as_dict()
+        assert json.loads(json.dumps(payload)) == payload
+        assert payload["is_active"] is False
+        assert payload["state_name"] == "Gujarat"
+
+    def test_str_reads_like_taxpayer_details(self) -> None:
+        assert str(Registration.from_payload(dict(self.ROW))) == "24AAACR5055K2ZC (Inactive)"
+        assert str(Registration.from_payload({"gstin": "X"})) == "X (unknown status)"
+
+    def test_frozen_and_hashable_fields(self) -> None:
+        row = Registration.from_payload(dict(self.ROW))
+        with pytest.raises(AttributeError):
+            row.gstin = "other"  # type: ignore[misc]
+
+
+class TestRegistrationFixture:
+    """A real capture: every GSTIN Reliance holds under one PAN."""
+
+    @pytest.fixture
+    def rows(self) -> tuple[Registration, ...]:
+        path = Path(__file__).parent / "fixtures" / "registrations_by_pan.json"
+        payload = json.loads(path.read_text())
+        return tuple(Registration.from_payload(row) for row in payload["gstinResList"])
+
+    def test_every_row_parses_and_shares_one_pan(self, rows: tuple[Registration, ...]) -> None:
+        assert len(rows) == 7
+        assert {row.number.pan for row in rows if row.number} == {"AAACR5055K"}
+
+    def test_statuses_differ_across_states(self, rows: tuple[Registration, ...]) -> None:
+        assert {row.is_active for row in rows} == {True, False}
+
+    def test_nothing_in_the_capture_is_unmapped(self, rows: tuple[Registration, ...]) -> None:
+        assert all(row.unmapped == {} for row in rows)
+
+    def test_the_portal_state_code_agrees_with_the_number(
+        self, rows: tuple[Registration, ...]
+    ) -> None:
+        """Held across all 68 rows of the live response this was cut from."""
+        assert all(row.state_code == row.gstin[:2] for row in rows)
+
+    def test_the_capture_includes_union_territories(self, rows: tuple[Registration, ...]) -> None:
+        """Ladakh and Daman and Diu, so the flag is exercised on real numbers."""
+        territories = {
+            number.state_name
+            for row in rows
+            if (number := row.number) and number.is_union_territory
+        }
+        assert territories == {"Ladakh", "Daman and Diu"}

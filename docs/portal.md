@@ -14,6 +14,7 @@ the portal is undocumented, so a claim without evidence is marked as such.
 | `fetch_financial_years()` | `/api/dropdownfinyear` | no |
 | `fetch_filing_preferences()` | `/api/search/taxpayerProfileDetails` | no |
 | `fetch_profile()` | all of the above | one |
+| `fetch_registrations_by_pan()` | `/api/get/gstndtls` | **yes**, one per PAN |
 
 `goodservice` returns SAC codes for service providers (`bzsdtls`) and HSN
 codes for goods (`bzgddtls`); both are parsed into `GoodsOrService`, with
@@ -57,6 +58,65 @@ applicant without a PAN may register against a TAN (`AAAA99999A`), the letters
 and digits the other way round, so that shape is accepted too. **No such
 registration has been observed**: every deductor found on the live portal uses
 a PAN. `identifier_type` reports which shape is present.
+
+## The PAN search
+
+`POST /services/api/get/gstndtls` with `{"panNO": "AAACR5055K", "captcha": "..."}`
+answers with every GSTIN registered against that PAN:
+
+```json
+{"panNum": null, "action": null, "gstinResList": [
+  {"gstin": "24AAACR5055K2ZC", "authStatus": "Inactive", "stateCd": "24"}]}
+```
+
+Established against the live portal:
+
+- The captcha is **single-use**. Replaying a solved one on the same session
+  for a second PAN is refused with `SWEB_9000`, exactly as the taxpayer
+  lookup refuses it.
+- `panNum` and `action` came back `null`, which is why nothing models them
+  and the client returns the list rather than an envelope object.
+- A rejection carries no `gstinResList` at all, so its absence - not the
+  status code - is what marks a failed lookup, the same rule as `gstin` on
+  the taxpayer endpoint.
+- `stateCd` repeated the number's own first two characters in all 68 rows of
+  a live response. It is kept as sent rather than derived, so a future
+  disagreement stays visible instead of one side silently winning.
+- A large taxpayer holds far more registrations than states: Reliance returned
+  68 against 38 state codes, several states more than once, because a company
+  may hold multiple registrations in one state. `registration_sequence` (the
+  13th character) tells them apart.
+- The request needs `Referer: .../searchtpbypan`; the portal fingerprints
+  clients per page.
+
+## Blind endpoint discovery does not work
+
+The portal sits behind a WAF that rejects any path not on its allowlist with
+an HTML `Request Rejected` page and a support ID, **not** a 404, while known
+paths on the same session keep answering normally. Guessing endpoint names
+therefore tells you nothing. Every endpoint here was found by watching what
+the portal's own pages call.
+
+## State and union territory master
+
+`GET /master/allstates?includeCbic=true` needs no captcha, no session and no
+cookies, and returns the portal's own list:
+
+```json
+{"data": [{"c": "27", "n": "Maharashtra", "u": "N", "m": "M2"}]}
+```
+
+`u` flags a union territory. Six codes carry it: 04, 25, 26, 31, 35 and 38.
+Delhi (07) and Puducherry (34) do **not**, although both are union
+territories: each has a legislature and is treated as a state for GST.
+
+The package decodes states offline, so this is not wrapped as a method. It
+backs `scripts/check_state_master.py`, which diffs the hardcoded table against
+the portal and is run before a release. The table was last checked against it
+with no drift. Two codes are kept that this master omits: `28`, retired on the
+Telangana split but still carried by older registrations, and `96`, from the
+NIC e-invoice master codes. This dropdown labels `99` "CBIC"; in a GSTIN it is
+the non-resident prefix, which is what the package reports.
 
 ## Field quirks
 

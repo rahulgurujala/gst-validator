@@ -8,6 +8,7 @@ from .exceptions import (
     CaptchaError,
     GSTValidatorError,
     InvalidGSTINError,
+    InvalidPANError,
     TaxpayerLookupError,
 )
 from .models import (
@@ -19,8 +20,10 @@ from .models import (
     GoodsOrService,
     GSTINLayout,
     Jurisdiction,
+    Registration,
     TaxpayerDetails,
     TaxpayerProfile,
+    validate_pan,
 )
 
 __all__ = [
@@ -38,8 +41,10 @@ __all__ = [
     "GSTValidatorError",
     "GoodsOrService",
     "InvalidGSTINError",
+    "InvalidPANError",
     "Jurisdiction",
     "NullCache",
+    "Registration",
     "TTLCache",
     "TaxpayerCache",
     "TaxpayerDetails",
@@ -49,5 +54,6 @@ __all__ = [
     "enrich_many",
     "main",
     "validate_many",
+    "validate_pan",
 ]
 __version__ = "0.3.0"  # x-release-please-version

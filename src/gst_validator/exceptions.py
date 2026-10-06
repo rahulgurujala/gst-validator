@@ -4,6 +4,7 @@ __all__ = [
     "CaptchaError",
     "GSTValidatorError",
     "InvalidGSTINError",
+    "InvalidPANError",
     "TaxpayerLookupError",
 ]
 
@@ -17,6 +18,20 @@ class InvalidGSTINError(GSTValidatorError, ValueError):
 
     def __init__(self, value: str, reason: str) -> None:
         super().__init__(f"invalid GSTIN {value!r}: {reason}")
+        self.value: str = value
+        self.reason: str = reason
+
+
+class InvalidPANError(GSTValidatorError, ValueError):
+    """Raised when a string is not a structurally valid PAN.
+
+    Separate from :class:`InvalidGSTINError` because the two are different
+    identifiers with different shapes, and a message saying "invalid GSTIN"
+    for a PAN would send the reader looking in the wrong place.
+    """
+
+    def __init__(self, value: str, reason: str) -> None:
+        super().__init__(f"invalid PAN {value!r}: {reason}")
         self.value: str = value
         self.reason: str = reason
 

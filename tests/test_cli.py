@@ -344,3 +344,126 @@ class TestCacheAndAbort:
         monkeypatch.setattr("builtins.input", interrupt)
         assert main([VALID_GSTIN]) == 130
         assert "aborted" in capsys.readouterr().err
+
+
+class TestPanFlag:
+    """`--pan` is its own mode: one captcha, a list of registrations out."""
+
+    @pytest.fixture(autouse=True)
+    def _client(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("gst_validator.cli.GSTClient", client_factory(transport()))
+        monkeypatch.setattr("builtins.input", answer("1a2b3"))
+
+    def test_json_lists_every_registration(self, capsys: pytest.CaptureFixture[str]) -> None:
+        assert main(["--pan", "AAACR5055K", "--json"]) == 0
+        rows = json.loads(capsys.readouterr().out)
+        assert len(rows) == 7
+        assert rows[0]["gstin"] == "24AAACR5055K2ZC"
+        assert rows[0]["is_active"] is False
+        assert rows[0]["state_name"] == "Gujarat"
+
+    def test_json_is_a_list_even_for_one_row(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """A PAN result is always a collection, unlike a single GSTIN lookup."""
+        assert main(["--pan", "AAACR5055K", "--json"]) == 0
+        assert isinstance(json.loads(capsys.readouterr().out), list)
+
+    def test_csv_carries_a_header_and_a_row_each(self, capsys: pytest.CaptureFixture[str]) -> None:
+        assert main(["--pan", "AAACR5055K", "--format", "csv"]) == 0
+        lines = capsys.readouterr().out.strip().splitlines()
+        assert lines[0].startswith("gstin,status,is_active,")
+        assert len(lines) == 8
+
+    def test_jsonl_streams_one_per_line(self, capsys: pytest.CaptureFixture[str]) -> None:
+        assert main(["--pan", "AAACR5055K", "--format", "jsonl"]) == 0
+        lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
+        assert len(lines) == 7
+        assert json.loads(lines[0])["gstin"] == "24AAACR5055K2ZC"
+
+    def test_the_table_names_the_states(self, capsys: pytest.CaptureFixture[str]) -> None:
+        assert main(["--pan", "AAACR5055K", "--no-color"]) == 0
+        stdout = capsys.readouterr().out
+        assert "Gujarat" in stdout
+        assert "Telangana" in stdout
+        assert "Inactive" in stdout
+
+    def test_a_lower_case_pan_is_accepted(self, capsys: pytest.CaptureFixture[str]) -> None:
+        assert main(["--pan", "  aaacr5055k ", "--json"]) == 0
+        assert len(json.loads(capsys.readouterr().out)) == 7
+
+    def test_a_bad_pan_exits_two_without_a_captcha(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def refuse(*_args: object, **_kwargs: object) -> str:  # pragma: no cover
+            raise AssertionError("no captcha should be requested")
+
+        monkeypatch.setattr("builtins.input", refuse)
+        assert main(["--pan", "NOPE"]) == 2
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "invalid PAN" in captured.err
+
+    def test_the_captcha_image_is_cleaned_up(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        target = tmp_path / "pan-captcha.png"
+        assert main(["--pan", "AAACR5055K", "--captcha-path", str(target), "--json"]) == 0
+        assert not target.exists()
+        assert "captcha image written to" in capsys.readouterr().err
+
+    def test_output_goes_to_a_file_when_asked(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        target = tmp_path / "pan.json"
+        assert main(["--pan", "AAACR5055K", "--json", "-o", str(target)]) == 0
+        assert capsys.readouterr().out == ""
+        assert len(json.loads(target.read_text())) == 7
+
+    def test_a_portal_rejection_exits_one(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            match request.url.path:
+                case "/services/searchtp":
+                    return httpx.Response(200, text="<html></html>")
+                case "/services/captcha":
+                    return httpx.Response(
+                        200, content=b"\x89PNG", headers={"content-type": "image/png"}
+                    )
+                case _:
+                    return httpx.Response(200, json={"errorCode": "SWEB_9000"})
+
+        monkeypatch.setattr(
+            "gst_validator.cli.GSTClient", client_factory(httpx.MockTransport(handler))
+        )
+        assert main(["--pan", "AAACR5055K", "--json"]) == 1
+        assert "PAN lookup failed" in capsys.readouterr().err
+
+    def test_an_empty_result_says_so_on_stderr(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            match request.url.path:
+                case "/services/searchtp":
+                    return httpx.Response(200, text="<html></html>")
+                case "/services/captcha":
+                    return httpx.Response(
+                        200, content=b"\x89PNG", headers={"content-type": "image/png"}
+                    )
+                case _:
+                    return httpx.Response(200, json={"gstinResList": []})
+
+        monkeypatch.setattr(
+            "gst_validator.cli.GSTClient", client_factory(httpx.MockTransport(handler))
+        )
+        assert main(["--pan", "AAACR5055K", "--json"]) == 0
+        captured = capsys.readouterr()
+        assert "no registrations found" in captured.err
+        assert json.loads(captured.out) == []
+
+    def test_the_captcha_data_uri_stays_off_stdout(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert main(["--pan", "AAACR5055K", "--json", "--captcha-base64"]) == 0
+        captured = capsys.readouterr()
+        assert "data:image/png;base64," in captured.err
+        assert isinstance(json.loads(captured.out), list)

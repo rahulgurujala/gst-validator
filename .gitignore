@@ -17,3 +17,6 @@ wheels/
 # Coverage
 .coverage
 htmlcov/
+
+# Browser-automation artifacts (investigating the portal)
+.playwright-mcp/
