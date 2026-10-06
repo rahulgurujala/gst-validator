@@ -583,7 +583,10 @@ class TestOfflineOutput:
             "valid": True,
             "state_code": "27",
             "state_name": "Maharashtra",
+            "identifier": "ABCFE1234F",
+            "identifier_type": "PAN",
             "pan": "ABCFE1234F",
+            "tan": None,
             "entity_type": "Firm / LLP",
             "registration_sequence": "1",
             "registration_type": "Regular",
@@ -1030,3 +1033,47 @@ class TestAsyncClientSurface:
                 return len(goods), len(years), len(prefs)
 
         assert self._run(go) == (1, 2, 2)
+
+
+class TestTanBasedGstin:
+    """A tax deductor may register with a TAN instead of a PAN.
+
+    TAN is AAAA99999A where PAN is AAAAA9999A, so a pattern built only for PAN
+    rejected every such registration outright.
+    """
+
+    TAN_BASED = "27MUMA12345B1D5"
+
+    def test_accepted(self) -> None:
+        gstin = GSTIN.parse(self.TAN_BASED)
+        assert gstin.identifier_type == "TAN"
+        assert gstin.tan == "MUMA12345B"
+        assert gstin.pan is None
+        assert gstin.registration_type == "TDS deductor"
+
+    def test_entity_type_is_not_guessed_from_a_tan(self) -> None:
+        # The 4th character of a TAN is the deductor's initial, not an entity
+        # class, so reading it as one would invent a fact.
+        assert GSTIN.parse(self.TAN_BASED).entity_type is None
+
+    def test_pan_based_is_unaffected(self) -> None:
+        gstin = GSTIN.parse(VALID_GSTIN)
+        assert gstin.identifier_type == "PAN"
+        assert gstin.pan == "ABCFE1234F"
+        assert gstin.tan is None
+        assert gstin.entity_type == "Firm / LLP"
+
+    def test_checksum_still_applies(self) -> None:
+        with pytest.raises(InvalidGSTINError, match="checksum"):
+            GSTIN(self.TAN_BASED[:-1] + "A")
+
+    def test_a_shape_that_is_neither_is_still_rejected(self) -> None:
+        with pytest.raises(InvalidGSTINError, match="format"):
+            GSTIN("27ABC123456X1ZW")
+
+    def test_offline_json_distinguishes_them(self, capsys: pytest.CaptureFixture[str]) -> None:
+        assert main([self.TAN_BASED, "--offline", "--json"]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["identifier_type"] == "TAN"
+        assert payload["tan"] == "MUMA12345B"
+        assert payload["pan"] is None

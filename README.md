@@ -68,7 +68,7 @@ sees `datetime.date`, `None` and exceptions.
 
 | | |
 |---|---|
-| **Offline validation** | Format and mod-36 checksum, plus state, PAN and entity type decoded from the number |
+| **Offline validation** | Format and mod-36 checksum, plus state, PAN or TAN, entity and registration type decoded from the number |
 | **Typed objects** | Dates parsed, `"NA"` / `""` / `null` normalised, nothing silently dropped |
 | **Captcha, your way** | Raw bytes, base64 or a `data:` URI, so a browser, a human or a service can solve it |
 | **Three free endpoints** | HSN/SAC codes, financial years and filing preferences need no captcha at all |
@@ -579,7 +579,7 @@ supported route; this package drives the public, captcha-gated search.
 
 ```bash
 uv sync              # install, including dev dependencies
-uv run pytest        # 89 tests, fully offline via httpx.MockTransport
+uv run pytest        # 95 tests, fully offline via httpx.MockTransport
 uv run mypy          # strict
 uv run pyright       # strict
 uv run ruff check .

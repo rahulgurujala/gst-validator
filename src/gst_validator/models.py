@@ -29,7 +29,12 @@ type StrPath = str | os.PathLike[str]
 # deductor under section 51 and "C" for a TCS collector under section 52, so
 # it cannot be pinned to "Z": that rejected valid government and e-commerce
 # registrations outright. The checksum remains the real guard against typos.
-_GSTIN_PATTERN: Final = re.compile(r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z][A-Z][0-9A-Z]$")
+# Characters 3-12 hold the holder's PAN (AAAAA9999A), or a TAN (AAAA99999A)
+# for a tax deductor registered without one, so both shapes are accepted.
+_PAN_SHAPE: Final = re.compile(r"^[A-Z]{5}[0-9]{4}[A-Z]$")
+_GSTIN_PATTERN: Final = re.compile(
+    r"^[0-9]{2}(?:[A-Z]{5}[0-9]{4}[A-Z]|[A-Z]{4}[0-9]{5}[A-Z])[1-9A-Z][A-Z][0-9A-Z]$"
+)
 _CHECKSUM_ALPHABET: Final = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 _DATE_FORMATS: Final = ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d")
 
@@ -191,13 +196,30 @@ class GSTIN:
         return _STATE_NAMES.get(self.state_code)
 
     @property
-    def pan(self) -> str:
+    def identifier(self) -> str:
+        """Characters 3-12: a PAN, or a TAN for a deductor registered without one."""
         return self.value[2:12]
 
     @property
+    def identifier_type(self) -> str:
+        """``"PAN"`` or ``"TAN"``, told apart by the shape of those characters."""
+        return "PAN" if _PAN_SHAPE.fullmatch(self.identifier) else "TAN"
+
+    @property
+    def pan(self) -> str | None:
+        """The holder's PAN, or ``None`` when the GSTIN embeds a TAN instead."""
+        return self.identifier if self.identifier_type == "PAN" else None
+
+    @property
+    def tan(self) -> str | None:
+        """The deductor's TAN, or ``None`` for an ordinary PAN-based GSTIN."""
+        return self.identifier if self.identifier_type == "TAN" else None
+
+    @property
     def entity_type(self) -> str | None:
-        """Entity class encoded in the 4th PAN character."""
-        return _PAN_ENTITY_TYPES.get(self.pan[3])
+        """Entity class encoded in the 4th PAN character; ``None`` for a TAN."""
+        pan = self.pan
+        return _PAN_ENTITY_TYPES.get(pan[3]) if pan is not None else None
 
     @property
     def registration_sequence(self) -> str:
