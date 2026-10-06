@@ -169,11 +169,24 @@ def _rejection(payload: dict[str, Any]) -> TaxpayerLookupError:
 
     The portal answers rejections with HTTP 200 and a body such as
     ``{"url": "/", "message": null, "errorCode": "SWEB_9000"}``, so the absence
-    of ``gstin`` - not the status code - is what marks a failed lookup.
+    of ``gstin`` - not the status code - is what marks a failed lookup. Some
+    endpoints nest the same fields one level down instead, as
+    ``{"status": 0, "error": {"message": "...", "errorCode": "..."}}``, so both
+    shapes are read before falling back to a generic message.
     """
-    raw_code: object = payload.get("errorCode")
+    nested = payload.get("error")
+    detail: dict[str, Any] = payload
+    if isinstance(nested, dict):
+        detail = cast(dict[str, Any], nested)
+
+    raw_code: object = detail.get("errorCode") or payload.get("errorCode")
     code = str(raw_code) if raw_code is not None else None
-    raw_message: object = payload.get("errorMsg") or payload.get("message")
+    raw_message: object = (
+        detail.get("errorMsg")
+        or detail.get("message")
+        or payload.get("errorMsg")
+        or payload.get("message")
+    )
     message = str(raw_message) if raw_message is not None else None
     if message is None:
         message = _ERROR_HINTS.get(code or "", "portal returned no taxpayer details")

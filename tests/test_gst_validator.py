@@ -724,3 +724,34 @@ class TestMarkupSafety:
         assert main([VALID_GSTIN, "--no-color"]) == 0
         stdout = capsys.readouterr().out
         assert "[bold red]INJECTED[/]" in stdout  # printed, not interpreted
+
+
+class TestNestedErrorEnvelope:
+    """Some endpoints nest the error fields under "error" instead of inlining them."""
+
+    def test_nested_code_and_message_are_surfaced(self) -> None:
+        nested = {
+            "status": 0,
+            "error": {"url": "/", "message": "Invalid paramater", "errorCode": "RT-NPRFA-1008"},
+        }
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/services/searchtp":
+                return httpx.Response(200, text="<html></html>")
+            return httpx.Response(200, json=nested)
+
+        with GSTClient(transport=httpx.MockTransport(handler)) as client:
+            with pytest.raises(TaxpayerLookupError, match="Invalid paramater") as caught:
+                client.fetch_financial_years(VALID_GSTIN)
+        assert caught.value.code == "RT-NPRFA-1008"
+
+    def test_flat_envelope_still_works(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/services/searchtp":
+                return httpx.Response(200, text="<html></html>")
+            return httpx.Response(200, json={"status": 0, "errorCode": "SWEB_9035"})
+
+        with GSTClient(transport=httpx.MockTransport(handler)) as client:
+            with pytest.raises(TaxpayerLookupError, match="locked") as caught:
+                client.fetch_financial_years(VALID_GSTIN)
+        assert caught.value.code == "SWEB_9035"
