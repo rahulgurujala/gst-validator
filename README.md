@@ -15,6 +15,7 @@
 [![License](https://img.shields.io/pypi/l/gst-validator?color=blue)](LICENSE)
 [![Typed](https://img.shields.io/badge/typing-strict-blue)](https://peps.python.org/pep-0561/)
 [![Downloads](https://img.shields.io/pypi/dm/gst-validator?color=777)](https://pypi.org/project/gst-validator/)
+[![Visitors](https://hits.sh/github.com/rahulgurujala/gst-validator.svg?style=flat&label=visitors&color=777)](https://hits.sh/github.com/rahulgurujala/gst-validator/)
 
 [Install](#install) · [CLI](#cli) · [Library](#using-it-in-your-app) · [Data](#what-you-get-back) · [Contributing](#contributing)
 
