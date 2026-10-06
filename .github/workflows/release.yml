@@ -11,6 +11,13 @@ on:
 permissions:
   contents: read
 
+# Never cancel a release mid-flight: two pushes landing close together would
+# otherwise race release-please against itself over the same tag, and could
+# interrupt a publish between the upload and the release assets. Queue instead.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   # Keeps a release pull request up to date from Conventional Commits. Merging
   # it bumps the version, writes the changelog, tags and creates the release.
