@@ -62,8 +62,10 @@ class TestOfflineOutput:
         assert main([VALID_GSTIN, "--offline", "--json"]) == 0
         payload = json.loads(capsys.readouterr().out)
         assert payload == {
-            "gstin": VALID_GSTIN,
+            "input": VALID_GSTIN,
             "valid": True,
+            "error": None,
+            "gstin": VALID_GSTIN,
             "state_code": "27",
             "state_name": "Maharashtra",
             "identifier": "ABCFE1234F",
@@ -73,6 +75,7 @@ class TestOfflineOutput:
             "entity_type": "Firm / LLP",
             "registration_sequence": "1",
             "registration_type": "Regular",
+            "layout": "pan",
         }
 
 
@@ -237,8 +240,14 @@ class TestMarkupSafety:
 
 
 class TestBatchInput:
-    def test_several_gstins_emit_json_lines(self, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_several_gstins_emit_a_json_array(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """--format json stays valid JSON overall, so jq can read the lot."""
         assert main([VALID_GSTIN, PUBLIC_GSTIN, "--offline", "--json"]) == 0
+        rows = json.loads(capsys.readouterr().out)
+        assert [row["gstin"] for row in rows] == [VALID_GSTIN, PUBLIC_GSTIN]
+
+    def test_jsonl_streams_one_object_per_line(self, capsys: pytest.CaptureFixture[str]) -> None:
+        assert main([VALID_GSTIN, PUBLIC_GSTIN, "--offline", "--format", "jsonl"]) == 0
         lines = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line.strip()]
         assert [row["gstin"] for row in lines] == [VALID_GSTIN, PUBLIC_GSTIN]
 
@@ -254,7 +263,7 @@ class TestBatchInput:
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr("sys.stdin", io.StringIO(f"{VALID_GSTIN}\n\n{PUBLIC_GSTIN}\n"))
-        assert main(["-", "--offline", "--json"]) == 0
+        assert main(["-", "--offline", "--format", "jsonl"]) == 0
         lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
         assert len(lines) == 2  # the blank line is skipped
 

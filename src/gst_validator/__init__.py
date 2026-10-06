@@ -1,5 +1,6 @@
 """Validate GSTINs and fetch taxpayer details from the Indian GST portal."""
 
+from .bulk import ValidationResult, enrich_many, validate_many
 from .cache import DEFAULT_CACHE, DiskCache, NullCache, TaxpayerCache, TTLCache
 from .cli import main
 from .client import AsyncGSTClient, GSTClient
@@ -44,6 +45,9 @@ __all__ = [
     "TaxpayerDetails",
     "TaxpayerLookupError",
     "TaxpayerProfile",
+    "ValidationResult",
+    "enrich_many",
     "main",
+    "validate_many",
 ]
 __version__ = "0.2.0"  # x-release-please-version

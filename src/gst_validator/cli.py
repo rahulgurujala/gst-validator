@@ -6,10 +6,12 @@ Progress messages go to stderr for the same reason.
 """
 
 import argparse
+import csv
 import json
 import sys
 import tempfile
-from collections.abc import Iterator, Sequence
+from collections.abc import Generator, Iterable, Iterator, Sequence
+from contextlib import contextmanager, redirect_stdout
 from importlib.metadata import version
 from pathlib import Path
 from typing import Any, cast
@@ -19,6 +21,7 @@ from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme
 
+from .bulk import ValidationResult, enrich_many, validate_many
 from .cache import DiskCache, NullCache, TaxpayerCache
 from .client import GSTClient
 from .exceptions import GSTValidatorError
@@ -48,10 +51,41 @@ out = Console(theme=_THEME, highlight=False)
 err = Console(theme=_THEME, highlight=False, stderr=True)
 
 
+_EPILOG = """\
+examples:
+  validate one, no network
+    gst-validator 27AAACR5055K1Z7 --offline
+
+  validate a whole column of a spreadsheet, still no network
+    gst-validator - --offline --column gstin --format csv < suppliers.csv > checked.csv
+
+  add the portal data that needs no captcha (HSN/SAC codes, years, filing)
+    gst-validator - --offline --enrich --format json < gstins.txt
+
+  one full lookup, which asks you to solve a captcha
+    gst-validator 27AAACR5055K1Z7
+
+  feed a pipeline
+    gst-validator 27AAACR5055K1Z7 --json | jq -r .legal_name
+
+output formats:
+  table   rich, human-readable; the default when stdout is a terminal
+  json    one object, or an array for several inputs
+  jsonl   one object per line, for streaming into jq
+  csv     a header row and one row per input, for spreadsheets
+  raw     the portal's own response body, unchanged
+
+exit codes:
+  0 success   1 lookup failed   2 invalid GSTIN   130 aborted
+"""
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="gst-validator",
-        description="Validate a GSTIN and fetch taxpayer details from the GST portal.",
+        description="Validate Indian GSTINs and fetch taxpayer details from the GST portal.",
+        epilog=_EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "gstin",
@@ -69,10 +103,36 @@ def _parser() -> argparse.ArgumentParser:
         help="only validate the GSTIN format and checksum, no network call",
     )
     parser.add_argument(
+        "-f",
+        "--format",
+        choices=("table", "json", "jsonl", "csv", "raw"),
+        default=None,
+        help="how to print the result (default: table)",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         dest="as_json",
-        help="print the modelled fields as JSON instead of a table",
+        help="shorthand for --format json",
+    )
+    parser.add_argument(
+        "--column",
+        metavar="NAME",
+        default=None,
+        help="read the input as CSV and take GSTINs from this column",
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        metavar="PATH",
+        type=Path,
+        default=None,
+        help="write the result to a file instead of stdout",
+    )
+    parser.add_argument(
+        "--enrich",
+        action="store_true",
+        help="add the captcha-free portal data to each row (HSN/SAC, years, filing)",
     )
     parser.add_argument(
         "--details-only",
@@ -82,7 +142,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--raw",
         action="store_true",
-        help="print the portal's response body verbatim, nothing dropped",
+        help="shorthand for --format raw",
     )
     parser.add_argument(
         "--captcha-path",
@@ -121,6 +181,143 @@ def _parser() -> argparse.ArgumentParser:
         help="disable colour and styling (also honours NO_COLOR)",
     )
     return parser
+
+
+@contextmanager
+def _destination(path: Path | None) -> Generator[None]:
+    """Send everything the renderers write to a file instead of stdout.
+
+    Both the plain `print` calls and the rich console are redirected, so every
+    format lands in the file and the terminal keeps only progress messages.
+    A fresh Console is swapped in rather than the global one being repointed:
+    reassigning `out.file` would pin it to whatever stdout happened to be at
+    the time, which outlives the block.
+    """
+    global out
+    if path is None:
+        yield
+        return
+    previous = out
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        out = Console(theme=_THEME, highlight=False, file=handle, no_color=previous.no_color)
+        try:
+            with redirect_stdout(handle):
+                yield
+        finally:
+            out = previous
+    err.print(Text.assemble(("written to ", "label"), (str(path), "accent")))
+
+
+def _chosen_format(args: argparse.Namespace) -> str:
+    """--format wins; --json and --raw stay as the shorthands they always were."""
+    if args.format:
+        return str(args.format)
+    if args.raw:
+        return "raw"
+    if args.as_json:
+        return "json"
+    return "table"
+
+
+def _write_csv(rows: Sequence[dict[str, Any]]) -> None:
+    """A header and one row per input, on plain stdout so it pipes cleanly."""
+    if not rows:
+        return
+    columns: list[str] = []
+    for row in rows:
+        columns.extend(key for key in row if key not in columns)
+    writer = csv.DictWriter(sys.stdout, fieldnames=columns, lineterminator="\n")
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({key: _csv_cell(row.get(key)) for key in columns})
+
+
+def _csv_cell(value: object) -> str:
+    """Flatten a value into one cell without inventing a nested format."""
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, list):
+        items: list[Any] = cast("list[Any]", value)  # type: ignore[redundant-cast]
+        return "; ".join(str(item) for item in items)
+    return str(value)
+
+
+def _results_table(rows: Sequence[ValidationResult]) -> Table:
+    """One line per input, so a batch reads as a list rather than a wall."""
+    table = Table(show_header=True, header_style="label", box=None, pad_edge=False)
+    table.add_column("gstin", no_wrap=True)
+    table.add_column("ok", no_wrap=True)
+    table.add_column("state", overflow="fold")
+    table.add_column("type", overflow="fold")
+    table.add_column("note", overflow="fold")
+    for row in rows:
+        gstin = row.gstin
+        mark = Text("yes", style="ok") if row.is_valid else Text("no", style="err")
+        table.add_row(
+            Text(gstin.value if gstin else row.value),
+            mark,
+            Text(gstin.state_name or "" if gstin else ""),
+            Text((gstin.registration_type or gstin.layout.value) if gstin else ""),
+            Text(row.error or row.enrichment_error or ""),
+        )
+    return table
+
+
+def _print_detail(row: ValidationResult) -> None:
+    """The vertical view for a single GSTIN, plus anything enrichment added."""
+    gstin = row.gstin
+    if gstin is None:
+        return
+    out.print(Text.assemble(("valid ", "ok"), (gstin.value, "gstin")))
+    out.print(_offline_table(gstin))
+    extras = (
+        ("goods and services", [str(item) for item in row.goods_and_services]),
+        ("financial years", [year.label for year in row.financial_years]),
+        ("filing preferences", [str(item) for item in row.filing_preferences]),
+    )
+    if any(values for _, values in extras):
+        table = Table(show_header=False, box=None, pad_edge=False, padding=(0, 2, 0, 0))
+        table.add_column("field", style="label", no_wrap=True)
+        table.add_column("value", overflow="fold")
+        for label, values in extras:
+            if values:
+                table.add_row(label, Text("\n".join(values)))
+        out.print(table)
+
+
+def _emit_results(rows: Sequence[ValidationResult], fmt: str) -> None:
+    """Render a bulk offline run in the requested format."""
+    payloads = [row.as_dict() for row in rows]
+    match fmt:
+        case "csv":
+            _write_csv(payloads)
+        case "jsonl":
+            for payload in payloads:
+                print(json.dumps(payload, ensure_ascii=False))
+        case "json":
+            print(
+                json.dumps(
+                    payloads if len(payloads) != 1 else payloads[0], indent=2, ensure_ascii=False
+                )
+            )
+        case "raw":
+            print(json.dumps(payloads, indent=2, ensure_ascii=False))
+        case _:
+            # Human output: results on stdout, problems on stderr. One input
+            # gets the detailed view it has always had; a batch gets a line
+            # each, which is what you want when scanning a column.
+            valid = [row for row in rows if row.gstin is not None]
+            for row in rows:
+                if row.gstin is None:
+                    err.print(
+                        Text.assemble(("invalid GSTIN ", "err"), f"{row.value!r}: {row.error}")
+                    )
+            if len(valid) == 1 and len(rows) == 1:
+                _print_detail(valid[0])
+            elif valid:
+                out.print(_results_table(valid))
 
 
 def _offline_fields(gstin: GSTIN) -> dict[str, object]:
@@ -199,6 +396,45 @@ def _offline_table(gstin: GSTIN) -> Table:
     return table
 
 
+def _lookup_many(gstins: Sequence[GSTIN], args: argparse.Namespace) -> list[TaxpayerProfile]:
+    """Full lookups for several GSTINs over one portal session.
+
+    Each lookup still needs its own captcha, because the portal issues a fresh
+    one per search, but they share a session rather than opening one each.
+    A row that fails is reported and the run carries on.
+    """
+    profiles: list[TaxpayerProfile] = []
+    with GSTClient(cache=_cache_for(args)) as client:
+        for index, gstin in enumerate(gstins, start=1):
+            if len(gstins) > 1:
+                err.print(
+                    Text.assemble(
+                        ("[", "label"),
+                        (f"{index}/{len(gstins)}", "accent"),
+                        ("] ", "label"),
+                        (gstin.value, "gstin"),
+                    )
+                )
+            cached = None if args.refresh else client.cached(gstin)
+            try:
+                if cached is not None:
+                    profiles.append(
+                        TaxpayerProfile(details=cached)
+                        if args.details_only
+                        else TaxpayerProfile(
+                            details=cached,
+                            goods_and_services=client.fetch_goods_and_services(gstin),
+                            financial_years=client.fetch_financial_years(gstin),
+                            filing_preferences=client.fetch_filing_preferences(gstin),
+                        )
+                    )
+                else:
+                    profiles.append(_lookup(client, gstin, args))
+            except GSTValidatorError as error:
+                err.print(Text.assemble(("lookup failed: ", "err"), f"{gstin.value}: {error}"))
+    return profiles
+
+
 def _lookup(client: GSTClient, gstin: GSTIN, args: argparse.Namespace) -> TaxpayerProfile:
     """Fetch a captcha, obtain its text, then look the GSTIN up."""
     captcha = client.fetch_captcha()
@@ -239,6 +475,24 @@ def _read_gstins(values: Sequence[str]) -> Iterator[str]:
             yield value
 
 
+def _read_csv(column: str) -> tuple[list[str], list[dict[str, str]]]:
+    """Take one column of a CSV on stdin, carrying the other fields through."""
+    reader = csv.DictReader(sys.stdin)
+    if reader.fieldnames is None or column not in reader.fieldnames:
+        found = ", ".join(reader.fieldnames or []) or "none"
+        message = f"no column {column!r} in the input; found: {found}"
+        raise GSTValidatorError(message)
+    values: list[str] = []
+    extras: list[dict[str, str]] = []
+    for record in reader:
+        value = (record.get(column) or "").strip()
+        if not value:
+            continue
+        values.append(value)
+        extras.append({k: v for k, v in record.items() if k != column and v is not None})
+    return values, extras
+
+
 def _dump(payload: object, *, compact: bool) -> None:
     """Pretty JSON for a single GSTIN, one object per line for a batch."""
     print(json.dumps(payload, indent=None if compact else 2, ensure_ascii=False))
@@ -249,67 +503,49 @@ def _cache_for(args: argparse.Namespace) -> TaxpayerCache:
     return NullCache() if args.no_cache else DiskCache()
 
 
-def _emit_offline(gstin: GSTIN, args: argparse.Namespace, *, compact: bool) -> None:
-    """Report what the number itself encodes, without contacting the portal."""
-    if args.as_json:
-        _dump(_offline_fields(gstin), compact=compact)
-    else:
-        out.print(Text.assemble(("valid ", "ok"), (gstin.value, "gstin")))
-        out.print(_offline_table(gstin))
-
-
-def _resolve(client: GSTClient, gstin: GSTIN, args: argparse.Namespace) -> TaxpayerProfile:
-    """Return the profile, spending a captcha only when the cache cannot answer."""
-    cached = None if args.refresh else client.cached(gstin)
-    if cached is None:
-        return _lookup(client, gstin, args)
-    if args.details_only:
-        return TaxpayerProfile(details=cached)
-    # The details were cached; the extras cost no captcha.
-    return TaxpayerProfile(
-        details=cached,
-        goods_and_services=client.fetch_goods_and_services(gstin),
-        financial_years=client.fetch_financial_years(gstin),
-        filing_preferences=client.fetch_filing_preferences(gstin),
-    )
-
-
-def _emit(profile: TaxpayerProfile, args: argparse.Namespace, *, compact: bool) -> None:
-    """Write the result: verbatim, as JSON, or as the human table."""
-    if args.raw:
-        _dump(profile.details.raw, compact=compact)
-    elif args.as_json:
-        _dump(profile.as_dict(), compact=compact)
-    else:
-        out.print(_profile_table(profile))
-
-
-def _one(raw: str, args: argparse.Namespace, *, compact: bool) -> int:
-    """Handle a single GSTIN and return its exit code."""
+def _run_bulk(args: argparse.Namespace, fmt: str) -> int:
+    """Offline validation of many inputs, optionally enriched, in one pass."""
     try:
-        gstin = GSTIN.parse(raw)
+        if args.column:
+            values, extras = _read_csv(args.column)
+        else:
+            values, extras = list(_read_gstins(args.gstin)), []
     except GSTValidatorError as error:
-        err.print(Text.assemble(("invalid: ", "err"), str(error)))
+        err.print(Text.assemble(("input: ", "err"), str(error)))
+        return 2
+    if not values:
+        err.print(Text("no GSTIN given", style="err"))
         return 2
 
-    if args.offline:
-        _emit_offline(gstin, args, compact=compact)
-        return 0
-
+    rows: Iterable[ValidationResult] = validate_many(values, extras=extras or None)
     try:
-        with GSTClient(cache=_cache_for(args)) as client:
-            profile = _resolve(client, gstin, args)
-        _emit(profile, args, compact=compact)
+        if args.enrich:
+            with GSTClient(cache=_cache_for(args)) as client:
+                rows = list(enrich_many(rows, client=client))
+        else:
+            rows = list(rows)
     except GSTValidatorError as error:
         err.print(Text.assemble(("lookup failed: ", "err"), str(error)))
         return 1
-    return 0
+
+    collected = list(rows)
+    _emit_results(collected, fmt)
+    invalid = [row for row in collected if not row.is_valid]
+    if not invalid:
+        return 0
+    if fmt != "table":
+        # The table renderer already named each bad row on stderr.
+        err.print(Text(f"{len(invalid)} of {len(collected)} inputs were invalid", style="err"))
+    elif len(collected) > 1:
+        err.print(Text(f"{len(invalid)} of {len(collected)} inputs were invalid", style="err"))
+    return 2
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.no_color:
         out.no_color = err.no_color = True
+    fmt = _chosen_format(args)
 
     if args.clear_cache:
         removed = DiskCache().clear()
@@ -317,25 +553,61 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     try:
-        raws = list(_read_gstins(args.gstin))
+        with _destination(args.output):
+            return _dispatch(args, fmt)
     except (EOFError, KeyboardInterrupt):
         err.print("[warn]aborted[/]")
         return 130
+    except OSError as error:
+        err.print(Text.assemble(("could not write output: ", "err"), str(error)))
+        return 1
+
+
+def _dispatch(args: argparse.Namespace, fmt: str) -> int:
+    """Offline work goes through the bulk path; a lookup opens one session."""
+    if args.offline or args.column or args.enrich:
+        return _run_bulk(args, fmt)
+
+    raws = list(_read_gstins(args.gstin))
     if not raws:
         err.print(Text("no GSTIN given", style="err"))
         return 2
 
-    # One GSTIN keeps the indented JSON object it has always printed; a batch
-    # emits JSON Lines so the output streams into jq and friends.
-    compact = len(raws) > 1
+    gstins: list[GSTIN] = []
     worst = 0
-    try:
-        for raw in raws:
-            worst = max(worst, _one(raw, args, compact=compact))
-    except (EOFError, KeyboardInterrupt):
-        err.print("[warn]aborted[/]")
-        return 130
+    for raw in raws:
+        try:
+            gstins.append(GSTIN.parse(raw))
+        except GSTValidatorError as error:
+            err.print(Text.assemble(("invalid GSTIN ", "err"), str(error)))
+            worst = 2
+    if not gstins:
+        return worst
+
+    profiles = _lookup_many(gstins, args)
+    if not profiles:
+        return max(worst, 1)
+    _emit_profiles(profiles, fmt)
     return worst
+
+
+def _emit_profiles(profiles: Sequence[TaxpayerProfile], fmt: str) -> None:
+    """Render full lookups: one object for one input, a list for several."""
+    match fmt:
+        case "raw":
+            bodies = [profile.details.raw for profile in profiles]
+            _dump(bodies if len(bodies) != 1 else bodies[0], compact=False)
+        case "json":
+            rows = [profile.as_dict() for profile in profiles]
+            _dump(rows if len(rows) != 1 else rows[0], compact=False)
+        case "jsonl":
+            for profile in profiles:
+                print(json.dumps(profile.as_dict(), ensure_ascii=False))
+        case "csv":
+            _write_csv([profile.as_dict() for profile in profiles])
+        case _:
+            for profile in profiles:
+                out.print(_profile_table(profile))
 
 
 if __name__ == "__main__":

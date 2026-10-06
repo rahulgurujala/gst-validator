@@ -1,7 +1,7 @@
 [project]
 name = "gst-validator"
 version = "0.2.0"
-description = "Validate GSTINs and fetch taxpayer details from the Indian GST portal"
+description = "Validate Indian GSTINs offline, in bulk, and fetch taxpayer details from the GST portal"
 readme = "README.md"
 authors = [
     { name = "rahulgurujala", email = "isaacnewtonrahul@gmail.com" }
