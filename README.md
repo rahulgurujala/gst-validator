@@ -188,6 +188,23 @@ gst-validator 27AAACR5055K1Z7 --json --captcha-base64 > taxpayer.json
 # the URI and the prompt appear on your terminal; only JSON reaches the file
 ```
 
+### Validating many at once
+
+Offline validation needs no captcha, so a whole column of GSTINs costs
+nothing:
+
+```bash
+gst-validator 27AAACR5055K1Z7 29AAACI4798L1ZU --offline --json
+cut -d, -f3 suppliers.csv | gst-validator - --offline --json > checked.jsonl
+```
+
+With more than one GSTIN the output is [JSON Lines](https://jsonlines.org/),
+one object per line, which streams into `jq` and loads straight into pandas. A
+single GSTIN still prints one indented object, as before. `-` reads them from
+stdin, one per line. The exit code is the worst of the batch, so a single
+malformed GSTIN still gives you `2` while the valid ones are reported
+normally.
+
 ### Other flags
 
 ```bash
@@ -196,6 +213,9 @@ gst-validator 27AAACR5055K1Z7 --refresh        # ignore the cache, force a fresh
 gst-validator 27AAACR5055K1Z7 --keep-captcha   # keep the image file for inspection
 gst-validator 27AAACR5055K1Z7 --captcha-path ./c.png   # write it where you want
 gst-validator 27AAACR5055K1Z7 --no-color               # plain text, no styling
+gst-validator 27AAACR5055K1Z7 --no-cache               # skip the on-disk cache
+gst-validator --clear-cache                            # forget every cached lookup
+gst-validator --version                                # print the version
 ```
 
 Also runnable as a module: `python -m gst_validator 27AAACR5055K1Z7`.
@@ -396,6 +416,31 @@ with GSTClient() as client:
     client.fetch_details(gstin, solved, refresh=True)  # bypass and overwrite
 ```
 
+**The CLI caches to disk.** A command-line run is a fresh process every time,
+so an in-memory cache would never hit: looking the same GSTIN up twice would
+mean solving two captchas. Entries live in the platform cache directory
+(`~/Library/Caches/gst-validator` on macOS,
+`${XDG_CACHE_HOME:-~/.cache}/gst-validator` on Linux, `%LOCALAPPDATA%` on
+Windows), one small JSON file per GSTIN, expiring after 24 hours.
+
+Those files hold taxpayer data at rest, a registered name and place of
+business, so they are worth knowing about:
+
+```bash
+gst-validator 27AAACR5055K1Z7 --no-cache      # neither read nor written
+gst-validator --clear-cache                   # delete the lot
+```
+
+```python
+from gst_validator import DiskCache
+
+DiskCache.default_directory()  # where it keeps them
+DiskCache(ttl=3600).clear()  # or manage it yourself
+```
+
+What is stored is the portal's own response body, so an entry written by an
+older version still reads back after the models grow.
+
 Back it with anything that satisfies the `TaxpayerCache` protocol:
 
 ```python
@@ -490,7 +535,7 @@ Shortcuts: `gstin`, `name`, `is_active`, `as_dict()`.
 | `state_jurisdiction` | `stj`, `stjCd` | `Jurisdiction` |
 | `einvoice_enabled` | `einvoiceStatus` | `bool \| None` |
 | `is_field_visit_conducted` | `isFieldVisitConducted` | `bool \| None` |
-| `core_business_activity` | `ntcrbs` (code expanded: Manufacturer, Trader, Service Provider and Others) | `str \| None` |
+| `core_business_activity` | `ntcrbs` (`SPO` and `MFT` expanded; any other code passes through) | `str \| None` |
 | `aadhaar_verified` | `adhrVFlag` | `bool \| None` |
 | `aadhaar_verified_on` | `adhrVdt` | `datetime.date \| None` |
 | `ekyc_status` | `ekycVFlag` | `str \| None` |
@@ -534,14 +579,14 @@ supported route; this package drives the public, captcha-gated search.
 
 ```bash
 uv sync              # install, including dev dependencies
-uv run pytest        # 65 tests, fully offline via httpx.MockTransport
+uv run pytest        # 80 tests, fully offline via httpx.MockTransport
 uv run mypy          # strict
 uv run pyright       # strict
 uv run ruff check .
 ```
 
 Tests parse payloads with the exact shape the live portal returns
-(`tests/fixtures/`, one service taxpayer and one goods taxpayer, with the
+(`tests/fixtures/`: a service provider, a manufacturer and a goods list, with the
 identifying values replaced by fictional ones) and assert `unmapped == {}`,
 so a portal schema change fails the suite instead of quietly losing data.
 

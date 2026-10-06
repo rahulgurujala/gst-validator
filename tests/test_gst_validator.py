@@ -1,9 +1,12 @@
 """Offline tests: every HTTP call goes through httpx.MockTransport."""
 
+import argparse
 import asyncio
+import io
 import json
 import subprocess
 import sys
+import time
 from collections.abc import Callable
 from datetime import date
 from importlib import metadata
@@ -19,9 +22,11 @@ from gst_validator import (
     AsyncGSTClient,
     Captcha,
     CaptchaError,
+    DiskCache,
     GSTClient,
     InvalidGSTINError,
     NullCache,
+    TaxpayerCache,
     TaxpayerDetails,
     TaxpayerLookupError,
     TaxpayerProfile,
@@ -89,9 +94,13 @@ PROFILE_PAYLOAD: dict[str, object] = {
 
 
 @pytest.fixture(autouse=True)
-def isolated_cache(monkeypatch: pytest.MonkeyPatch) -> None:
-    """DEFAULT_CACHE is process-wide by design; give each test a fresh one."""
+def isolated_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Keep tests off both shared caches: the process-wide one and the disk."""
     monkeypatch.setattr("gst_validator.client.DEFAULT_CACHE", TTLCache())
+    monkeypatch.setattr(
+        "gst_validator.cache.DiskCache.default_directory",
+        staticmethod(lambda: tmp_path / "disk-cache"),
+    )
 
 
 def _transport(details: httpx.Response | None = None) -> httpx.MockTransport:
@@ -367,7 +376,7 @@ class TestCaptchaCleanup:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
         target = tmp_path / "captcha.png"
-        monkeypatch.setattr("gst_validator.cli.GSTClient", lambda: _FakeClient(_transport()))
+        monkeypatch.setattr("gst_validator.cli.GSTClient", _client_factory(_transport()))
         monkeypatch.setattr("builtins.input", _answer("1a2b3"))
         assert main([VALID_GSTIN, "--captcha-path", str(target)]) == 0
         assert not target.exists()
@@ -377,10 +386,22 @@ class TestCaptchaCleanup:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         target = tmp_path / "captcha.png"
-        monkeypatch.setattr("gst_validator.cli.GSTClient", lambda: _FakeClient(_transport()))
+        monkeypatch.setattr("gst_validator.cli.GSTClient", _client_factory(_transport()))
         monkeypatch.setattr("builtins.input", _answer("1a2b3"))
         assert main([VALID_GSTIN, "--captcha-path", str(target), "--keep-captcha"]) == 0
         assert target.read_bytes() == b"\x89PNG-bytes"
+
+
+def _client_factory(
+    transport: httpx.MockTransport, cache: TaxpayerCache | None = None
+) -> Callable[..., GSTClient]:
+    """Stand in for `gst_validator.cli.GSTClient`, which the CLI calls with a cache."""
+
+    def build(**kwargs: object) -> GSTClient:
+        chosen = cache if cache is not None else kwargs.get("cache")
+        return _FakeClient(transport, cache=chosen if isinstance(chosen, TaxpayerCache) else None)
+
+    return build
 
 
 def _answer(text: str) -> Callable[..., str]:
@@ -395,8 +416,8 @@ def _answer(text: str) -> Callable[..., str]:
 class _FakeClient(GSTClient):
     """GSTClient pinned to a mock transport, usable where the CLI builds one."""
 
-    def __init__(self, transport: httpx.MockTransport) -> None:
-        super().__init__(transport=transport, cache=TTLCache())
+    def __init__(self, transport: httpx.MockTransport, cache: TaxpayerCache | None = None) -> None:
+        super().__init__(transport=transport, cache=cache or TTLCache())
 
 
 class TestCaptchaFreeEndpoints:
@@ -584,7 +605,7 @@ class TestRichOutput:
     def test_json_output_has_no_styling_or_wrapping(
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr("gst_validator.cli.GSTClient", lambda: _FakeClient(_transport()))
+        monkeypatch.setattr("gst_validator.cli.GSTClient", _client_factory(_transport()))
         monkeypatch.setattr("builtins.input", _answer("1a2b3"))
         assert main([VALID_GSTIN, "--json"]) == 0
         stdout = capsys.readouterr().out
@@ -594,7 +615,7 @@ class TestRichOutput:
     def test_raw_output_round_trips(
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr("gst_validator.cli.GSTClient", lambda: _FakeClient(_transport()))
+        monkeypatch.setattr("gst_validator.cli.GSTClient", _client_factory(_transport()))
         monkeypatch.setattr("builtins.input", _answer("1a2b3"))
         assert main([VALID_GSTIN, "--raw"]) == 0
         assert json.loads(capsys.readouterr().out) == PAYLOAD
@@ -602,7 +623,7 @@ class TestRichOutput:
     def test_table_renders_objects_not_dicts(
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr("gst_validator.cli.GSTClient", lambda: _FakeClient(_transport()))
+        monkeypatch.setattr("gst_validator.cli.GSTClient", _client_factory(_transport()))
         monkeypatch.setattr("builtins.input", _answer("1a2b3"))
         assert main([VALID_GSTIN, "--no-color"]) == 0
         stdout = capsys.readouterr().out
@@ -633,7 +654,7 @@ class TestRichOutput:
             sys.stdout.write(prompt)
             return "1a2b3"
 
-        monkeypatch.setattr("gst_validator.cli.GSTClient", lambda: _FakeClient(_transport()))
+        monkeypatch.setattr("gst_validator.cli.GSTClient", _client_factory(_transport()))
         monkeypatch.setattr("builtins.input", prompting_input)
         assert main([VALID_GSTIN, "--json"]) == 0
         captured = capsys.readouterr()
@@ -644,7 +665,7 @@ class TestRichOutput:
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """--captcha-base64 with --json must leave stdout as pure JSON."""
-        monkeypatch.setattr("gst_validator.cli.GSTClient", lambda: _FakeClient(_transport()))
+        monkeypatch.setattr("gst_validator.cli.GSTClient", _client_factory(_transport()))
         monkeypatch.setattr("builtins.input", _answer("1a2b3"))
         assert main([VALID_GSTIN, "--json", "--captcha-base64"]) == 0
         captured = capsys.readouterr()
@@ -679,7 +700,8 @@ class TestUnmappedRendering:
                     return httpx.Response(200, json={"status": 1, "data": []})
 
         monkeypatch.setattr(
-            "gst_validator.cli.GSTClient", lambda: _FakeClient(httpx.MockTransport(handler))
+            "gst_validator.cli.GSTClient",
+            _client_factory(httpx.MockTransport(handler)),
         )
         monkeypatch.setattr("builtins.input", _answer("1a2b3"))
         assert main([VALID_GSTIN, "--no-color"]) == 0
@@ -718,7 +740,8 @@ class TestMarkupSafety:
                     return httpx.Response(200, json={"status": 1, "data": []})
 
         monkeypatch.setattr(
-            "gst_validator.cli.GSTClient", lambda: _FakeClient(httpx.MockTransport(handler))
+            "gst_validator.cli.GSTClient",
+            _client_factory(httpx.MockTransport(handler)),
         )
         monkeypatch.setattr("builtins.input", _answer("1a2b3"))
         assert main([VALID_GSTIN, "--no-color"]) == 0
@@ -755,3 +778,152 @@ class TestNestedErrorEnvelope:
             with pytest.raises(TaxpayerLookupError, match="locked") as caught:
                 client.fetch_financial_years(VALID_GSTIN)
         assert caught.value.code == "SWEB_9035"
+
+
+class TestDiskCache:
+    """The CLI is short-lived, so its cache has to outlive the process."""
+
+    def test_round_trips_through_a_new_instance(self, tmp_path: Path) -> None:
+        details = TaxpayerDetails.from_payload(dict(PAYLOAD))
+        DiskCache(directory=tmp_path).set(VALID_GSTIN, details)
+        # A different instance stands in for the next CLI invocation.
+        restored = DiskCache(directory=tmp_path).get(VALID_GSTIN)
+        assert restored is not None
+        assert restored.legal_name == "ACME TRADERS"
+        assert restored.raw == PAYLOAD  # the portal body is what is stored
+
+    def test_entries_expire(self, tmp_path: Path) -> None:
+        cache = DiskCache(directory=tmp_path, ttl=0.01)
+        cache.set(VALID_GSTIN, TaxpayerDetails.from_payload(dict(PAYLOAD)))
+        time.sleep(0.02)
+        assert cache.get(VALID_GSTIN) is None
+
+    def test_corrupt_and_missing_entries_are_a_miss_not_a_crash(self, tmp_path: Path) -> None:
+        cache = DiskCache(directory=tmp_path)
+        assert cache.get(VALID_GSTIN) is None  # nothing written yet
+        tmp_path.mkdir(exist_ok=True)
+        (tmp_path / f"{VALID_GSTIN}.json").write_text("{not json")
+        assert cache.get(VALID_GSTIN) is None
+
+    def test_unwritable_directory_does_not_fail_the_lookup(self, tmp_path: Path) -> None:
+        blocked = tmp_path / "file-not-a-dir"
+        blocked.write_text("")
+        cache = DiskCache(directory=blocked / "sub")
+        cache.set(VALID_GSTIN, TaxpayerDetails.from_payload(dict(PAYLOAD)))  # must not raise
+        assert cache.get(VALID_GSTIN) is None
+
+    def test_clear_removes_entries(self, tmp_path: Path) -> None:
+        cache = DiskCache(directory=tmp_path)
+        cache.set(VALID_GSTIN, TaxpayerDetails.from_payload(dict(PAYLOAD)))
+        assert cache.clear() == 1
+        assert cache.get(VALID_GSTIN) is None
+
+    def test_a_second_cli_run_spends_no_captcha(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The point of the whole thing: look twice, solve one captcha."""
+        captchas = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal captchas
+            match request.url.path:
+                case "/services/searchtp":
+                    return httpx.Response(200, text="<html></html>")
+                case "/services/captcha":
+                    captchas += 1
+                    return httpx.Response(
+                        200, content=b"\x89PNG", headers={"content-type": "image/png"}
+                    )
+                case "/services/api/search/taxpayerDetails":
+                    return httpx.Response(200, json=PAYLOAD)
+                case _:
+                    return httpx.Response(200, json={"status": 1, "data": []})
+
+        shared = DiskCache(directory=tmp_path)
+        monkeypatch.setattr(
+            "gst_validator.cli.GSTClient",
+            _client_factory(httpx.MockTransport(handler), cache=shared),
+        )
+
+        def pinned_cache(_args: argparse.Namespace) -> TaxpayerCache:
+            return shared
+
+        monkeypatch.setattr("gst_validator.cli._cache_for", pinned_cache)
+        monkeypatch.setattr("builtins.input", _answer("1a2b3"))
+
+        assert main([VALID_GSTIN, "--json"]) == 0
+        assert main([VALID_GSTIN, "--json"]) == 0
+        capsys.readouterr()
+        assert captchas == 1
+
+
+class TestBatchInput:
+    def test_several_gstins_emit_json_lines(self, capsys: pytest.CaptureFixture[str]) -> None:
+        assert main([VALID_GSTIN, PUBLIC_GSTIN, "--offline", "--json"]) == 0
+        lines = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line.strip()]
+        assert [row["gstin"] for row in lines] == [VALID_GSTIN, PUBLIC_GSTIN]
+
+    def test_a_single_gstin_still_prints_one_indented_object(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert main([VALID_GSTIN, "--offline", "--json"]) == 0
+        stdout = capsys.readouterr().out
+        assert stdout.startswith("{\n")  # unchanged from before batching
+        assert json.loads(stdout)["gstin"] == VALID_GSTIN
+
+    def test_stdin_is_read_for_a_dash(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("sys.stdin", io.StringIO(f"{VALID_GSTIN}\n\n{PUBLIC_GSTIN}\n"))
+        assert main(["-", "--offline", "--json"]) == 0
+        lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
+        assert len(lines) == 2  # the blank line is skipped
+
+    def test_worst_exit_code_wins(self, capsys: pytest.CaptureFixture[str]) -> None:
+        assert main([VALID_GSTIN, "NOPE", "--offline"]) == 2
+        captured = capsys.readouterr()
+        assert "invalid GSTIN" in captured.err
+        assert VALID_GSTIN in captured.out  # the valid one still reported
+
+    def test_no_gstin_at_all_is_an_error(self, capsys: pytest.CaptureFixture[str]) -> None:
+        assert main(["--offline"]) == 2
+        assert "no GSTIN given" in capsys.readouterr().err
+
+
+class TestVersionFlag:
+    def test_version_matches_the_distribution(self, capsys: pytest.CaptureFixture[str]) -> None:
+        with pytest.raises(SystemExit) as exit_info:
+            main(["--version"])
+        assert exit_info.value.code == 0
+        assert metadata.version("gst-validator") in capsys.readouterr().out
+
+
+class TestManufacturerPayload:
+    """A second live capture: a manufacturer in another state.
+
+    Caught that the Core Business Activity code for a manufacturer is "MFT",
+    not the "MFR" its name suggests.
+    """
+
+    @pytest.fixture
+    def manufacturer(self) -> TaxpayerDetails:
+        path = Path(__file__).parent / "fixtures" / "taxpayer_manufacturer.json"
+        return TaxpayerDetails.from_payload(json.loads(path.read_text()))
+
+    def test_core_business_code(self, manufacturer: TaxpayerDetails) -> None:
+        assert manufacturer.raw["ntcrbs"] == "MFT"
+        assert manufacturer.core_business_activity == "Manufacturer"
+
+    def test_nothing_is_dropped(self, manufacturer: TaxpayerDetails) -> None:
+        assert manufacturer.unmapped == {}
+
+    def test_shape_differences_from_the_service_fixture(
+        self, manufacturer: TaxpayerDetails
+    ) -> None:
+        # This taxpayer has several business natures and no additional
+        # addresses; the portal omits `adadr` entirely rather than sending [].
+        assert len(manufacturer.nature_of_business) > 1
+        assert manufacturer.additional_addresses == ()
+        assert "adadr" not in manufacturer.raw
+        assert manufacturer.principal_address is not None
+        assert not manufacturer.principal_address.is_empty
