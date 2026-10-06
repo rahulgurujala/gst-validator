@@ -1150,7 +1150,7 @@ class TestRealWorldLayouts:
         for value, (country, year) in self.NON_RESIDENT.items():
             gstin = GSTIN.parse(value)
             assert gstin.is_non_resident
-            assert gstin.country_code == country
+            assert gstin.holder_code == country
             assert gstin.registration_year == year
             # None of the PAN-based fields apply to this layout.
             assert gstin.pan is None

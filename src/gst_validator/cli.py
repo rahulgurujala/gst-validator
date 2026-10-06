@@ -249,6 +249,41 @@ def _cache_for(args: argparse.Namespace) -> TaxpayerCache:
     return NullCache() if args.no_cache else DiskCache()
 
 
+def _emit_offline(gstin: GSTIN, args: argparse.Namespace, *, compact: bool) -> None:
+    """Report what the number itself encodes, without contacting the portal."""
+    if args.as_json:
+        _dump(_offline_fields(gstin), compact=compact)
+    else:
+        out.print(Text.assemble(("valid ", "ok"), (gstin.value, "gstin")))
+        out.print(_offline_table(gstin))
+
+
+def _resolve(client: GSTClient, gstin: GSTIN, args: argparse.Namespace) -> TaxpayerProfile:
+    """Return the profile, spending a captcha only when the cache cannot answer."""
+    cached = None if args.refresh else client.cached(gstin)
+    if cached is None:
+        return _lookup(client, gstin, args)
+    if args.details_only:
+        return TaxpayerProfile(details=cached)
+    # The details were cached; the extras cost no captcha.
+    return TaxpayerProfile(
+        details=cached,
+        goods_and_services=client.fetch_goods_and_services(gstin),
+        financial_years=client.fetch_financial_years(gstin),
+        filing_preferences=client.fetch_filing_preferences(gstin),
+    )
+
+
+def _emit(profile: TaxpayerProfile, args: argparse.Namespace, *, compact: bool) -> None:
+    """Write the result: verbatim, as JSON, or as the human table."""
+    if args.raw:
+        _dump(profile.details.raw, compact=compact)
+    elif args.as_json:
+        _dump(profile.as_dict(), compact=compact)
+    else:
+        out.print(_profile_table(profile))
+
+
 def _one(raw: str, args: argparse.Namespace, *, compact: bool) -> int:
     """Handle a single GSTIN and return its exit code."""
     try:
@@ -258,34 +293,13 @@ def _one(raw: str, args: argparse.Namespace, *, compact: bool) -> int:
         return 2
 
     if args.offline:
-        if args.as_json:
-            _dump(_offline_fields(gstin), compact=compact)
-        else:
-            out.print(Text.assemble(("valid ", "ok"), (gstin.value, "gstin")))
-            out.print(_offline_table(gstin))
+        _emit_offline(gstin, args, compact=compact)
         return 0
 
     try:
         with GSTClient(cache=_cache_for(args)) as client:
-            cached = None if args.refresh else client.cached(gstin)
-            if cached is None:
-                profile = _lookup(client, gstin, args)
-            elif args.details_only:
-                profile = TaxpayerProfile(details=cached)
-            else:
-                # The details were cached; the extras cost no captcha.
-                profile = TaxpayerProfile(
-                    details=cached,
-                    goods_and_services=client.fetch_goods_and_services(gstin),
-                    financial_years=client.fetch_financial_years(gstin),
-                    filing_preferences=client.fetch_filing_preferences(gstin),
-                )
-        if args.raw:
-            _dump(profile.details.raw, compact=compact)
-        elif args.as_json:
-            _dump(profile.as_dict(), compact=compact)
-        else:
-            out.print(_profile_table(profile))
+            profile = _resolve(client, gstin, args)
+        _emit(profile, args, compact=compact)
     except GSTValidatorError as error:
         err.print(Text.assemble(("lookup failed: ", "err"), str(error)))
         return 1
