@@ -270,6 +270,9 @@ class TaxpayerDetails:
             "trade_name": self.trade_name,
             "status": self.status,
             "is_active": self.is_active,
+            # Without this a consumer sees is_active false and has to parse the
+            # status string to tell "Inactive" from "Cancelled suo-moto".
+            "is_cancelled": self.is_cancelled,
             "constitution": self.constitution,
             "taxpayer_type": self.taxpayer_type,
             "registration_date": self.registration_date.isoformat()
@@ -287,7 +290,7 @@ class TaxpayerDetails:
             "central_jurisdiction": str(self.central_jurisdiction) or None,
             "state_jurisdiction": str(self.state_jurisdiction) or None,
             "einvoice_enabled": self.einvoice_enabled,
-            "field_visit_conducted": self.is_field_visit_conducted,
+            "is_field_visit_conducted": self.is_field_visit_conducted,
             "core_business_activity": self.core_business_activity,
             "aadhaar_verified": self.aadhaar_verified,
             "aadhaar_verified_on": (

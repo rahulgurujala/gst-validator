@@ -294,3 +294,30 @@ class TestAbsentMarkersAreNotFalse:
             path = Path(__file__).parent / "fixtures" / name
             details = TaxpayerDetails.from_payload(json.loads(path.read_text()))
             assert details.einvoice_enabled is expected
+
+
+class TestAsDictShape:
+    """The JSON shape is a public contract, so its keys must be consistent."""
+
+    def test_every_modelled_field_appears(self) -> None:
+        from dataclasses import fields
+
+        details = TaxpayerDetails.from_payload({"gstin": VALID_GSTIN})
+        payload = details.as_dict()
+        expected = {f.name for f in fields(TaxpayerDetails)} - {"raw"}
+        assert not expected - set(payload)
+
+    def test_boolean_keys_keep_their_is_prefix(self) -> None:
+        """is_active kept its prefix while field_visit_conducted had lost one."""
+        payload = TaxpayerDetails.from_payload({"gstin": VALID_GSTIN}).as_dict()
+        assert "is_active" in payload
+        assert "is_cancelled" in payload
+        assert "is_field_visit_conducted" in payload
+        assert "field_visit_conducted" not in payload
+
+    def test_a_cancelled_taxpayer_is_legible_without_parsing_the_status(self) -> None:
+        path = Path(__file__).parent / "fixtures" / "taxpayer_cancelled.json"
+        payload = TaxpayerDetails.from_payload(json.loads(path.read_text())).as_dict()
+        assert payload["is_active"] is False
+        assert payload["is_cancelled"] is True
+        assert payload["status"] == "Cancelled suo-moto"

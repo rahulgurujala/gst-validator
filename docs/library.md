@@ -384,6 +384,11 @@ Shortcuts: `gstin`, `name`, `is_active`, `as_dict()`.
 | `composition_rate` | `cmpRt` | `str \| None` (answered "NA" even for composition dealers) |
 | `raw` | everything | `dict[str, Any]` |
 
+`as_dict()` returns every field above under its own name, with dates as ISO
+strings, plus the derived `is_active` and `is_cancelled` so a consumer can
+tell "Inactive" from "Cancelled suo-moto" without parsing the status string,
+and `extra` holding anything unmapped.
+
 Helpers: `is_active`, `is_cancelled`, `addresses` (principal first),
 `as_dict()`, and `unmapped`, which lists portal keys this class does not model, so a new
 portal field is never silently dropped.
