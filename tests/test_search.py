@@ -185,24 +185,47 @@ class TestGSTPractitioner:
 
 
 class TestCompositionTaxpayer:
+    """Pinned to a captured response: the row carries gstin, lnm, indt, oudt.
+
+    Six of the seven field names this was first written against did not exist.
+    The fixture keeps the real shape with invented identities, because these
+    registrations belong to sole proprietors rather than companies.
+    """
+
     PAYLOAD: ClassVar[dict[str, Any]] = {
         "gstin": "27ABCPE1234F1ZB",
-        "lgnm": "A TRADER",
-        "tradeNam": "Trader",
-        "stcd": "27",
-        "dtyp": "Composition",
-        "rgdt": "01/04/2023",
+        "lnm": "A SOLE TRADER",
+        "oudt": "31/03/2025",
+        "indt": "01/04/2024",
     }
 
-    def test_fields_and_number(self) -> None:
+    def test_the_four_fields_the_portal_actually_sends(self) -> None:
         row = CompositionTaxpayer.from_payload(dict(self.PAYLOAD))
-        assert row.name == "Trader"
-        assert row.registration_date == date(2023, 4, 1)
+        assert row.legal_name == "A SOLE TRADER"
+        assert row.opted_in_on == date(2024, 4, 1)
+        assert row.opted_out_on == date(2025, 3, 31)
+        assert row.unmapped == {}
+
+    def test_the_state_comes_from_the_number(self) -> None:
+        """The row carries no state code, so it is decoded rather than read."""
+        row = CompositionTaxpayer.from_payload(dict(self.PAYLOAD))
+        assert row.state_code == "27"
         assert row.number is not None
         assert row.number.state_name == "Maharashtra"
 
+    def test_the_captured_fixture_parses_whole(self) -> None:
+        rows = [
+            CompositionTaxpayer.from_payload(entry)
+            for entry in json.loads((FIXTURES / "composition_list.json").read_text())
+        ]
+        assert len(rows) == 2
+        assert all(row.number for row in rows)
+        assert all(row.unmapped == {} for row in rows)
+
     def test_junk_gstin_degrades(self) -> None:
-        assert CompositionTaxpayer.from_payload({"gstin": "NOPE"}).number is None
+        row = CompositionTaxpayer.from_payload({"gstin": "NOPE"})
+        assert row.number is None
+        assert row.state_code is None
 
     def test_search_sends_the_scheme_direction(self) -> None:
         seen: dict[str, Any] = {}
@@ -211,12 +234,33 @@ class TestCompositionTaxpayer:
             if request.url.path == "/services/searchtp":
                 return httpx.Response(200, text="<html></html>")
             seen.update(json.loads(request.content))
-            return httpx.Response(200, json={"status": 1, "data": {"tpList": [self.PAYLOAD]}})
+            return httpx.Response(200, json=[self.PAYLOAD])
 
         with GSTClient(transport=httpx.MockTransport(handler)) as client:
             rows = client.search_composition_taxpayers("27", "2025-2026", "1a2b3", opted_in=False)
         assert seen == {"op": "R", "captcha": "1a2b3", "stcd": "27", "fy": "2025-2026"}
         assert len(rows) == 1
+
+    def test_a_success_is_a_bare_list_not_an_envelope(self) -> None:
+        """This endpoint does not use the {"status": 1, "data": ...} wrapper the
+        other list endpoints do. Parsing it as one raised "unexpected payload
+        type list" on every real call, including successful ones."""
+        row = {"gstin": "27ABCPE1234F1ZB", "lgnm": "A TRADER"}
+        with GSTClient(transport=_transport({"opteddata": [row]})) as client:
+            rows = client.search_composition_taxpayers("27", "2025-2026", "1a2b3")
+        assert len(rows) == 1
+        assert rows[0].gstin == "27ABCPE1234F1ZB"
+
+    def test_an_empty_list_means_no_match_not_a_failure(self) -> None:
+        """Observed live: Maharashtra 2025-2026 opted-in answers []."""
+        with GSTClient(transport=_transport({"opteddata": []})) as client:
+            assert client.search_composition_taxpayers("27", "2025-2026", "1a2b3") == ()
+
+    def test_a_rejection_is_an_object_and_still_raises(self) -> None:
+        """Success and failure are told apart by the type of the body."""
+        with GSTClient(transport=_transport({"opteddata": {"errorCode": "SWEB_9000"}})) as client:
+            with pytest.raises(TaxpayerLookupError, match="captcha"):
+                client.search_composition_taxpayers("27", "2025-2026", "wrong")
 
     def test_empty_captcha_refused(self) -> None:
         with GSTClient(transport=_transport({})) as client:

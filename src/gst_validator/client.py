@@ -167,13 +167,21 @@ class _BaseGSTClient:
 
     @staticmethod
     def _as_composition(response: httpx.Response) -> tuple[CompositionTaxpayer, ...]:
-        """The opted-in/out list, which arrives under ``data`` behind an envelope."""
-        data = _envelope(response)
-        rows: object = data
-        if isinstance(data, dict):
-            mapping = cast(dict[str, Any], data)
-            rows = mapping.get("tpList") or mapping.get("list") or mapping.get("response")
-        return tuple(CompositionTaxpayer.from_payload(entry) for entry in _entries(rows))
+        """The opted-in/out list.
+
+        A success is a bare JSON array, not the ``{"status": 1, "data": ...}``
+        envelope the other list endpoints use; a rejection is an object with an
+        ``errorCode``. So the type of the body is what tells them apart, and an
+        empty array means no taxpayer matched that state and year, which is an
+        answer rather than a failure.
+        """
+        try:
+            body: object = response.json()
+        except ValueError as error:
+            raise TaxpayerLookupError("portal returned a non-JSON body") from error
+        if isinstance(body, dict):
+            raise _rejection(cast(dict[str, Any], body))
+        return tuple(CompositionTaxpayer.from_payload(entry) for entry in _entries(body))
 
     @staticmethod
     def _as_application(response: httpx.Response) -> ApplicationStatus:

@@ -79,7 +79,8 @@ class HSNCode:
         return " - ".join(part for part in (self.code, self.description) if part)
 
 
-_COMPOSITION_KEYS: Final = frozenset({"gstin", "lgnm", "tradeNam", "stcd", "dtyp", "rgdt", "appdt"})
+# Captured live: the row carries exactly these four keys and no others.
+_COMPOSITION_KEYS: Final = frozenset({"gstin", "lnm", "indt", "oudt"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,15 +90,27 @@ class CompositionTaxpayer:
     A composition dealer pays tax at a flat rate and **cannot charge you GST
     you are able to reclaim**, so finding a supplier on this list is a
     practical matter, not a curiosity.
+
+    The portal answers with four fields and no more: it does not return a
+    trade name, a state code or a taxpayer type here, so neither does this.
+    The state is available from :attr:`number` anyway, since it is the first
+    two characters of the GSTIN.
+
+    Many of these registrations belong to sole proprietors, so ``legal_name``
+    is often a private individual's name rather than a company's. It is
+    personal data; see the project's security policy.
     """
 
     gstin: str
     legal_name: str | None = None
-    trade_name: str | None = None
-    state_code: str | None = None
-    taxpayer_type: str | None = None
-    registration_date: date | None = None
-    applicable_from: date | None = None
+    """``lnm``. Often an individual: composition suits small sole traders."""
+
+    opted_in_on: date | None = None
+    """``indt``, the date the scheme began applying."""
+
+    opted_out_on: date | None = None
+    """``oudt``, the date it stopped or is due to stop."""
+
     unmapped: dict[str, Any] = field(default_factory=dict[str, Any])
 
     @classmethod
@@ -105,12 +118,9 @@ class CompositionTaxpayer:
         """Build from one ``opteddata`` entry."""
         return cls(
             gstin=as_text(payload.get("gstin")) or "",
-            legal_name=as_text(payload.get("lgnm")),
-            trade_name=as_text(payload.get("tradeNam")),
-            state_code=as_text(payload.get("stcd")),
-            taxpayer_type=as_text(payload.get("dtyp")),
-            registration_date=as_date(payload.get("rgdt")),
-            applicable_from=as_date(payload.get("appdt")),
+            legal_name=as_text(payload.get("lnm")),
+            opted_in_on=as_date(payload.get("indt")),
+            opted_out_on=as_date(payload.get("oudt")),
             unmapped=_unmapped(payload, _COMPOSITION_KEYS),
         )
 
@@ -123,12 +133,13 @@ class CompositionTaxpayer:
             return None
 
     @property
-    def name(self) -> str | None:
-        """Trade name when present, else the legal name."""
-        return self.trade_name or self.legal_name
+    def state_code(self) -> str | None:
+        """From the number, since the row itself does not carry one."""
+        number = self.number
+        return number.state_code if number else None
 
     def __str__(self) -> str:
-        return f"{self.gstin} ({self.name or 'unknown name'})"
+        return f"{self.gstin} ({self.legal_name or 'unknown name'})"
 
 
 _ARN_KEYS: Final = frozenset(

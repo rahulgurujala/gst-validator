@@ -26,6 +26,9 @@ it. Worth knowing:
   business in plain text. `--no-cache` turns it off and `--clear-cache` empties
   it. The library does not cache to disk unless you pass `DiskCache` yourself.
   A PAN search is not cached at all, so its results never reach the disk.
+- **The composition list is personal data.** The scheme suits small sole
+  proprietors, so the legal names it returns are frequently individuals
+  rather than companies. The fixture for it in this repository is invented.
 - **The practitioner directory is personal data.** `search_practitioners()`
   returns named private individuals. The portal publishes a personal phone
   number and email address alongside each one; this package does not carry

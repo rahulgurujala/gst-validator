@@ -441,7 +441,7 @@ has a field.
 | Type | From | Notable |
 |---|---|---|
 | `HSNCode` | `search_hsn_codes()` | `code`, `description`, `is_service`, `chapter` |
-| `CompositionTaxpayer` | `search_composition_taxpayers()` | `gstin`, `number`, `name`, `registration_date` |
+| `CompositionTaxpayer` | `search_composition_taxpayers()` | `gstin`, `number`, `legal_name`, `opted_in_on`, `opted_out_on` |
 | `ApplicationStatus` | `track_application()` | `arn`, `status_description`, `form`, `submitted_on` |
 | `ReferenceNumber` | `verify_reference_number()` | `is_genuine`, `document_type`, `issued_on` |
 | `GSTPractitioner` | `search_practitioners()` | `enrolment_number`, `name`, `pincode`, `is_active` |

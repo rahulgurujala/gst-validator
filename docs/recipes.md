@@ -174,6 +174,11 @@ flagged = [gstin for gstin in my_suppliers if gstin in scheme]
 A taxpayer's own lookup says the same thing in `taxpayer_type`, but that costs
 one captcha each; this costs one for the whole state.
 
+Each row gives the GSTIN, the legal name and the dates the scheme applied
+from and to. An empty result means nobody matched that state and year, not
+that something failed. Many of these are sole proprietors, so the names are
+often individuals: treat the output as personal data.
+
 ## Look a commodity code up
 
 Free, so there is nothing to ration:

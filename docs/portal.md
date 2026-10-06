@@ -126,7 +126,27 @@ drops the phone number and email.
 
 **Composition scheme** - `POST /api/search/tplist/opteddata` with
 `{op, stcd, fy, captcha}`, where `op` is `O` for opted in and `R` for opted
-out. One captcha per state and financial year.
+out. One captcha per state and financial year, single-use like the rest.
+
+A success is a **bare JSON array**, not the `{"status": 1, "data": ...}`
+envelope the other list endpoints use; a rejection is an object carrying an
+`errorCode`, so the type of the body is what tells them apart. An empty array
+means nothing matched that state and year, which is an answer rather than a
+failure: Maharashtra for 2025-2026 answered `[]` while 2024-2025 returned
+rows.
+
+Each row carries four keys and no more:
+
+```json
+{"gstin": "27XXXPX1234X1ZX", "lnm": "A SOLE TRADER",
+ "indt": "01/04/2024", "oudt": "31/03/2025"}
+```
+
+`lnm` is the legal name, `indt` the date the scheme began applying and `oudt`
+the date it stops. There is no trade name, state code or taxpayer type here,
+though the state is decodable from the GSTIN. **These are frequently private
+individuals**: composition suits small sole proprietors, so `lnm` is often a
+person's name rather than a company's.
 
 **Track an application** - `GET /trackarn?arn=&captcha=`. One captcha. An
 ARN, Application Reference Number, is the receipt the department issues for
