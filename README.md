@@ -315,7 +315,27 @@ with GSTClient() as client:
     # (FilingPreference(quarter='Q1', preference='Q'), ...)   -> .is_quarterly / .is_monthly
 ```
 
-### 3. The full lookup (one captcha)
+### 3. Three layouts, one class
+
+The portal issues more than one shape of GSTIN, and most of `GSTIN`'s
+properties apply to only one of them, so `layout` is the value to branch on:
+
+```python
+from gst_validator import GSTIN, GSTINLayout
+
+match GSTIN.parse(value).layout:
+    case GSTINLayout.PAN:  # 27AAACR5055K1Z7, the ordinary one
+        ...  # pan, entity_type, registration_type apply
+    case GSTINLayout.NON_RESIDENT:  # 9917USA29016OS6, an overseas OIDAR provider
+        ...  # holder_code is the country code
+    case GSTINLayout.UIN:  # 2317UNO00001UND, a UN body or embassy
+        ...  # holder_code is the body, state_name applies
+```
+
+Properties that do not apply to the layout in hand return `None` rather than
+raising, and `is_regular`, `is_non_resident` and `is_uin` remain as shortcuts.
+
+### 4. The full lookup (one captcha)
 
 The captcha is bound to the client's cookies, so fetch and submit must happen
 on the **same instance**:
@@ -335,7 +355,7 @@ profile.as_dict()  # everything, JSON-ready
 `fetch_details()` instead of `fetch_profile()` if you only want the
 captcha-gated part.
 
-### 4. Web app: captcha to the browser, text back
+### 5. Web app: captcha to the browser, text back
 
 The pattern the original Flask app was reaching for: keep one client per
 pending lookup, keyed by a session id:
@@ -377,7 +397,7 @@ The front end renders `image` straight into `<img src="{{ image }}">`, since it 
 already a `data:` URI. Give `pending` an expiry; portal sessions do not live
 forever, and an abandoned entry leaks a connection pool.
 
-### 5. Async
+### 6. Async
 
 Same API, `await` and `async with`:
 
@@ -395,7 +415,7 @@ async def codes(gstin: str) -> tuple[str, ...]:
 asyncio.run(codes("27AAACR5055K1Z7"))
 ```
 
-### 6. Caching
+### 7. Caching
 
 Each live lookup costs a human-solved captcha, so successful results are
 cached in a process-wide `TTLCache` (24 h, 512 entries, LRU, thread-safe).
@@ -469,7 +489,7 @@ concurrent lookups. The *cache* is the shared piece; clients stay cheap and
 short-lived. The cache stores `.raw`, so a cached entry survives a model
 upgrade.
 
-### 7. Error handling
+### 8. Error handling
 
 ```
 GSTValidatorError
@@ -579,7 +599,7 @@ supported route; this package drives the public, captcha-gated search.
 
 ```bash
 uv sync              # install, including dev dependencies
-uv run pytest        # 129 tests, fully offline via httpx.MockTransport
+uv run pytest        # 132 tests, fully offline via httpx.MockTransport
 uv run mypy          # strict
 uv run pyright       # strict
 uv run ruff check .

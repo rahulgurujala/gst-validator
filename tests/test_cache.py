@@ -148,3 +148,29 @@ class TestDiskCache:
         assert main([VALID_GSTIN, "--json"]) == 0
         capsys.readouterr()
         assert captchas == 1
+
+
+class TestDiskCacheKeySafety:
+    """A cache key becomes a file name, so it must not be able to escape."""
+
+    def test_traversal_key_is_refused(self, tmp_path: Path) -> None:
+        cache = DiskCache(directory=tmp_path / "cache")
+        details = TaxpayerDetails.from_payload({"gstin": VALID_GSTIN})
+        for key in ("../../escaped", "a/b", "..", "", "x" * 40, "lower-case"):
+            with pytest.raises(ValueError, match="unsafe cache key"):
+                cache.set(key, details)
+        assert [p for p in tmp_path.iterdir() if p.is_file()] == []
+
+    def test_a_gstin_is_a_valid_key(self, tmp_path: Path) -> None:
+        cache = DiskCache(directory=tmp_path)
+        details = TaxpayerDetails.from_payload({"gstin": VALID_GSTIN})
+        cache.set(VALID_GSTIN, details)
+        assert cache.get(VALID_GSTIN) is not None
+
+    def test_every_live_layout_is_a_valid_key(self, tmp_path: Path) -> None:
+        """The non-PAN layouts must not trip the guard."""
+        cache = DiskCache(directory=tmp_path)
+        details = TaxpayerDetails.from_payload({"gstin": VALID_GSTIN})
+        for key in ("9917USA29016OS6", "2317UNO00001UND", "27AAICA3918J1CT"):
+            cache.set(key, details)
+            assert cache.get(key) is not None

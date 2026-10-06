@@ -8,6 +8,7 @@ cookies a captcha is bound to), while cached results are session-independent.
 
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -19,6 +20,10 @@ from typing import Any, Final, Protocol, cast, runtime_checkable
 from .models import TaxpayerDetails
 
 __all__ = ["DEFAULT_CACHE", "DiskCache", "NullCache", "TTLCache", "TaxpayerCache"]
+
+# A cache key becomes a file name, so it may hold nothing that could climb out
+# of the directory. GSTINs are upper-case alphanumeric and fifteen characters.
+_CACHE_KEY: Final = re.compile(r"^[0-9A-Z]{1,32}$")
 
 _DEFAULT_TTL: Final = 24 * 60 * 60.0
 _DEFAULT_MAXSIZE: Final = 512
@@ -128,8 +133,21 @@ class DiskCache:
             base = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
         return base / "gst-validator"
 
+    @staticmethod
+    def _safe_key(gstin: str) -> str:
+        """Reject a key that would name a file outside the cache directory.
+
+        Keys reaching this class from the clients are always validated GSTINs,
+        but :class:`DiskCache` is part of the public surface and someone may
+        wire it to input of their own, where a key of ``"../../x"`` would
+        otherwise write outside :attr:`directory`.
+        """
+        if not _CACHE_KEY.fullmatch(gstin):
+            raise ValueError(f"unsafe cache key {gstin!r}")
+        return gstin
+
     def _path(self, gstin: str) -> Path:
-        return self.directory / f"{gstin}.json"
+        return self.directory / f"{self._safe_key(gstin)}.json"
 
     def get(self, gstin: str) -> TaxpayerDetails | None:
         path = self._path(gstin)
