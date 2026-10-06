@@ -197,3 +197,45 @@ class TestDiskCacheResilience:
         cache.set(VALID_GSTIN, TaxpayerDetails.from_payload({"gstin": VALID_GSTIN}))
         assert cache.clear() == 2
         assert list(tmp_path.iterdir()) == []
+
+
+class TestDefaultCacheDirectory:
+    """The platform branches, which CI never reaches.
+
+    The autouse fixture replaces this method for every other test and CI runs
+    on Linux only, so without this the Windows and macOS paths ship unexecuted
+    while the metadata claims the package is OS independent.
+    """
+
+    @staticmethod
+    def _directory(monkeypatch: pytest.MonkeyPatch, platform: str, **environ: str) -> Path:
+        monkeypatch.undo()  # drop the autouse stub so the real method runs
+        monkeypatch.setattr("gst_validator.cache.sys.platform", platform)
+        for name in ("LOCALAPPDATA", "XDG_CACHE_HOME"):
+            monkeypatch.delenv(name, raising=False)
+        for name, value in environ.items():
+            monkeypatch.setenv(name, value)
+        return DiskCache.default_directory()
+
+    def test_macos_uses_library_caches(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        path = self._directory(monkeypatch, "darwin")
+        assert path.parts[-3:] == ("Library", "Caches", "gst-validator")
+
+    def test_windows_honours_localappdata(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        path = self._directory(monkeypatch, "win32", LOCALAPPDATA=r"C:\Users\x\AppData\Local")
+        assert path.name == "gst-validator"
+        assert "Local" in str(path)
+
+    def test_windows_falls_back_when_localappdata_is_unset(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        path = self._directory(monkeypatch, "win32")
+        assert path.parts[-3:] == ("AppData", "Local", "gst-validator")
+
+    def test_linux_honours_xdg_cache_home(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        path = self._directory(monkeypatch, "linux", XDG_CACHE_HOME="/custom/cache")
+        assert path == Path("/custom/cache/gst-validator")
+
+    def test_linux_falls_back_to_dot_cache(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        path = self._directory(monkeypatch, "linux")
+        assert path.parts[-2:] == (".cache", "gst-validator")
