@@ -579,14 +579,15 @@ supported route; this package drives the public, captcha-gated search.
 
 ```bash
 uv sync              # install, including dev dependencies
-uv run pytest        # 103 tests, fully offline via httpx.MockTransport
+uv run pytest        # 109 tests, fully offline via httpx.MockTransport
 uv run mypy          # strict
 uv run pyright       # strict
 uv run ruff check .
 ```
 
 Tests parse payloads with the exact shape the live portal returns
-(`tests/fixtures/`: a service provider, a manufacturer and a goods list, with the
+(`tests/fixtures/`: a service provider, a manufacturer, a statutory body and a
+goods list, with the
 identifying values replaced by fictional ones) and assert `unmapped == {}`,
 so a portal schema change fails the suite instead of quietly losing data.
 

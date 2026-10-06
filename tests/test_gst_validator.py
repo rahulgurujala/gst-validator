@@ -1180,3 +1180,60 @@ class TestRealWorldLayouts:
         payload = json.loads(capsys.readouterr().out)
         assert payload["valid"] is True
         assert payload["pan"] is None
+
+
+class TestStatutoryBodyPayload:
+    """Central Warehousing Corporation: a statutory body in Tamil Nadu.
+
+    Contributes shapes the other two fixtures lack: a constitution that is not
+    a company, eight nature-of-business entries, e-invoicing switched on, and
+    an aadhaar flag of "No" with no accompanying date field at all.
+    """
+
+    @pytest.fixture
+    def body(self) -> TaxpayerDetails:
+        path = Path(__file__).parent / "fixtures" / "taxpayer_statutory_body.json"
+        return TaxpayerDetails.from_payload(json.loads(path.read_text()))
+
+    def test_constitution_is_not_a_company(self, body: TaxpayerDetails) -> None:
+        assert body.constitution == "Created under special act of parliament"
+
+    def test_negative_flags_and_a_missing_date(self, body: TaxpayerDetails) -> None:
+        assert body.aadhaar_verified is False
+        assert body.aadhaar_verified_on is None  # "adhrVdt" is absent entirely
+        assert "adhrVdt" not in body.raw
+        assert body.einvoice_enabled is True  # the first live "Yes" we have seen
+        assert body.is_field_visit_conducted is False
+
+    def test_na_composition_rate_normalises(self, body: TaxpayerDetails) -> None:
+        assert body.raw["cmpRt"] == "NA"
+        assert body.composition_rate is None
+
+    def test_many_business_natures(self, body: TaxpayerDetails) -> None:
+        assert len(body.nature_of_business) == 8
+
+    def test_nothing_is_dropped(self, body: TaxpayerDetails) -> None:
+        assert body.unmapped == {}
+
+
+class TestLegacyServiceCodes:
+    """Taxpayers migrated in 2017 can still carry pre-GST accounting codes."""
+
+    def test_eight_digit_service_tax_codes_parse(self) -> None:
+        payload = {
+            "bzsdtls": [
+                {"saccd": "996511", "sdes": "Road transport services of Goods"},
+                {"saccd": "00440193", "sdes": "STORAGE AND WAREHOUSE SERVICE"},
+            ]
+        }
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/services/searchtp":
+                return httpx.Response(200, text="<html></html>")
+            return httpx.Response(200, json=payload)
+
+        with GSTClient(transport=httpx.MockTransport(handler)) as client:
+            items = client.fetch_goods_and_services(VALID_GSTIN)
+        # Codes are kept verbatim: a SAC is not always six digits.
+        assert [item.code for item in items] == ["996511", "00440193"]
+        assert all(item.is_service for item in items)

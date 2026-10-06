@@ -1,0 +1,31 @@
+{
+  "ntcrbs": "SPO",
+  "adhrVFlag": "No",
+  "lgnm": "CENTRAL WAREHOUSING CORPORATION",
+  "stj": "State - Tamil Nadu,Division - CHENNAI SOUTH,Zone - South-II,Circle - KOTTURPURAM (Jurisdictional Office)",
+  "dty": "Regular",
+  "cxdt": "",
+  "gstin": "33AAACC1206D1ZN",
+  "nba": [
+    "Bonded Warehouse",
+    "Works Contract",
+    "Warehouse / Depot",
+    "Recipient of Goods or Services",
+    "Service Provision",
+    "Supplier of Services",
+    "Others",
+    "Wholesale Business"
+  ],
+  "ekycVFlag": "No",
+  "cmpRt": "NA",
+  "rgdt": "01/07/2017",
+  "ctb": "Created under special act of parliament",
+  "pradr": {
+    "adr": "No.4, Thiruvalar Illam, North Avenue, Srinagar Colony, Saidapet, Chennai, Chennai, Tamil Nadu, 600015"
+  },
+  "sts": "Active",
+  "tradeNam": "CENTRAL WAREHOUSING CORPORATION",
+  "isFieldVisitConducted": "No",
+  "ctj": "State - CBIC,Zone - CHENNAI,Commissionerate - CHENNAI-SOUTH,Division - GUINDY,Range - RANGE II",
+  "einvoiceStatus": "Yes"
+}
