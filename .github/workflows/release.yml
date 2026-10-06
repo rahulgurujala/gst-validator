@@ -86,12 +86,16 @@ jobs:
             exit 1
           fi
 
+      # The same gate as CI, so nothing can be published that CI would have
+      # stopped. Keep these two lists in step.
       - name: Test before publishing
         run: |
           uv lock --check
           uv sync --locked --all-extras --dev
           uv run ruff check .
+          uv run ruff format --check .
           uv run mypy
+          uv run pyright
           uv run pytest -q
 
       - name: Build

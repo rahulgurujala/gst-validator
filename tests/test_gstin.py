@@ -335,12 +335,16 @@ class TestParsingRobustness:
 
         random.seed(7)
         alphabet = string.printable + "अ١٢３​\x00﻿"
+        unexpected: list[tuple[str, str]] = []
         for _ in range(5000):
             value = "".join(random.choice(alphabet) for _ in range(random.randint(0, 24)))
             try:
                 GSTIN.parse(value)
             except InvalidGSTINError:
                 pass
+            except Exception as error:
+                unexpected.append((value, type(error).__name__))
+        assert unexpected == []
 
     def test_the_checksum_catches_single_character_damage(self) -> None:
         """Its whole purpose: a typo in any position must be refused.

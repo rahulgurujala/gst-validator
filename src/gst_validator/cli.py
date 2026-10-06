@@ -70,14 +70,18 @@ examples:
     gst-validator 27AAACR5055K1Z7 --json | jq -r .legal_name
 
 output formats:
-  table   rich, human-readable; the default when stdout is a terminal
+  table   rich, human-readable; the default
   json    one object, or an array for several inputs
   jsonl   one object per line, for streaming into jq
   csv     a header row and one row per input, for spreadsheets
   raw     the portal's own response body, unchanged
 
+  Only the table is styled. The rest are plain text, so piping and
+  redirection stay byte-exact. Results go to stdout, progress to stderr.
+
 exit codes:
-  0 success   1 lookup failed   2 invalid GSTIN   130 aborted
+  0 success        1 lookup failed    2 invalid GSTIN
+  130 aborted      141 pipe closed by the reader, as head does
 """
 
 
@@ -247,6 +251,11 @@ def _csv_cell(value: object) -> str:
     if isinstance(value, list):
         items: list[Any] = cast("list[Any]", value)  # type: ignore[redundant-cast]
         return "; ".join(str(item) for item in items)
+    if isinstance(value, dict):
+        # Only `extra` arrives here, and only when the portal has grown a field.
+        # A Python dict repr in a spreadsheet cell helps nobody.
+        pairs: dict[str, Any] = cast("dict[str, Any]", value)
+        return "; ".join(f"{key}={item}" for key, item in pairs.items())
     return str(value)
 
 
