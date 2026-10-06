@@ -154,11 +154,17 @@ any application: a registration, an amendment, a refund, a cancellation. It
 is 15 characters: two fixed letters, the state code, MMYY, a serial and a
 check character.
 
-**The success shape here has not been observed.** A real ARN whose
-registration had already completed answered `SWEB_10001` with the captcha
-accepted, which suggests this pre-login tracker only follows applications
-still in progress. The failure path is handled - it raises
-`TaxpayerLookupError` carrying the code - but the fields on
+**The success shape here has not been observed.** A real ARN answered
+`SWEB_10001` with the captcha accepted, and its registration had since been
+granted - the applicant confirmed the GSTIN had been issued. Two lines of
+evidence therefore point the same way: this pre-login tracker follows an
+application only while it is still in progress, and an ARN stops resolving
+once the registration is granted. That is consistent with what the code
+appears to mean, though the portal publishes no definition of it.
+
+The practical consequence is that this endpoint can only be exercised by
+someone with an application actually pending. The failure path is handled -
+it raises `TaxpayerLookupError` carrying the code - but the fields on
 `ApplicationStatus` are inferred from the portal's own screens rather than
 from a captured response, so treat them as provisional.
 
