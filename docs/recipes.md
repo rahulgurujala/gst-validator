@@ -100,6 +100,54 @@ gst-validator 27AAACR5055K1Z7 --captcha-base64 --json -o taxpayer.json
 The URI and the prompt go to stderr, so `taxpayer.json` still holds nothing
 but JSON.
 
+## Find every registration a supplier holds
+
+A company registers once per state against one PAN, so the GSTIN on an
+invoice is rarely the whole relationship. The PAN is inside that GSTIN, so one
+number is enough to find the rest:
+
+```bash
+pan=$(gst-validator 27AAACR5055K1Z7 --offline --json | jq -r .pan)
+gst-validator --pan "$pan" --format csv -o registrations.csv
+```
+
+The first command touches nothing; the second costs one captcha. In Python,
+the same two steps:
+
+```python
+from gst_validator import GSTClient, GSTIN
+
+pan = GSTIN.parse("27AAACR5055K1Z7").pan
+
+with GSTClient() as client:
+    captcha = client.fetch_captcha()
+    solved = input(f"solve this: {captcha.data_uri}\n> ")
+    registrations = client.fetch_registrations_by_pan(pan, solved)
+
+for reg in registrations:
+    state = reg.number.state_name if reg.number else reg.state_code
+    print(f"{reg.gstin}  {state}  {'active' if reg.is_active else reg.status}")
+```
+
+Useful on the result:
+
+```python
+# which states is this supplier actually trading in today?
+active = [r for r in registrations if r.is_active]
+
+# a cancelled registration you are still invoicing against is worth knowing
+dormant = [r for r in registrations if not r.is_active]
+
+# several registrations in one state are normal; the 13th character orders them
+by_state: dict[str, list[str]] = {}
+for reg in registrations:
+    by_state.setdefault(reg.state_code or "??", []).append(reg.gstin)
+```
+
+Each PAN costs its own captcha, and the portal makes each captcha single-use,
+so this is a per-supplier operation rather than something to run over a whole
+spreadsheet.
+
 ## Serve it from a web app
 
 The captcha is bound to the session that fetched it, so keep one client per

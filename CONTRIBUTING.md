@@ -73,9 +73,8 @@ that version too.
 
 - **Tests never hit the network.** Every HTTP call goes through
   `httpx.MockTransport`. If you add an endpoint, add a fixture under
-  `tests/fixtures/` with the real payload shape. Tests are split by subject
-  (`test_gstin.py`, `test_taxpayer.py`, `test_client.py`, `test_cache.py`,
-  `test_cli.py`); shared payloads and helpers live in `tests/support.py`.
+  `tests/fixtures/` with the real payload shape. The modules are listed under
+  [Where things live](#where-things-live).
 - **Never commit a real taxpayer's data.** Fixtures use either a public
   company's registration or a fictional, checksum-valid GSTIN. Do not add
   someone's name, address or GSTIN to this repo.
@@ -85,8 +84,14 @@ that version too.
   `--json` and `--raw` are written with `print()` so pipes and `jq` get
   byte-exact output. Progress messages belong on stderr.
 - **Model the portal, do not guess it.** New fields come from an observed
-  response. Keep the raw body in `TaxpayerDetails.raw`, add the key to
-  `_MAPPED_KEYS`, and let the `unmapped == {}` test prove nothing was dropped.
+  response, never from a blog post. Add the key to the model and to that
+  model's key set (`_MAPPED_KEYS`, `_REGISTRATION_KEYS`), and let the
+  `unmapped == {}` tests prove nothing was dropped.
+- **Keep a raw body only where something round-trips it.**
+  `TaxpayerDetails.raw` exists because the disk cache stores it and must
+  survive the models growing. `Registration` keeps none: every key it
+  receives has a field, and `unmapped` carries anything new. A second copy of
+  a payload nothing re-reads is weight without a job.
 
 ## When the portal changes
 
@@ -95,7 +100,7 @@ stops parsing:
 
 1. Capture the real body with `gst-validator <GSTIN> --raw`.
 2. Strip anything identifying and add it to `tests/fixtures/`.
-3. Add the key to the model and to `_MAPPED_KEYS`.
+3. Add the key to the model and to that model's key set.
 
 A failing `unmapped == {}` assertion is the intended signal, not a flake.
 

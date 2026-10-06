@@ -13,7 +13,7 @@ rather than a public issue. Expect an acknowledgement within a few days.
 ## Scope notes
 
 This package talks to the public GST portal on behalf of the person running
-it. Two things are worth knowing:
+it. Worth knowing:
 
 - **Taxpayer data is personal data.** Responses may contain a registered name
   and a place of business. Do not paste real responses into issues, pull
@@ -25,6 +25,7 @@ it. Two things are worth knowing:
   or `%LOCALAPPDATA%`). Those files hold a registered name and place of
   business in plain text. `--no-cache` turns it off and `--clear-cache` empties
   it. The library does not cache to disk unless you pass `DiskCache` yourself.
+  A PAN search is not cached at all, so its results never reach the disk.
 - **Credentials.** The package stores no credentials and needs none. Releases
   are published with PyPI Trusted Publishing, so no long-lived token exists in
   this repository.

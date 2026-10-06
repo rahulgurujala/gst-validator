@@ -547,7 +547,10 @@ def _run_pan(args: argparse.Namespace, fmt: str) -> int:
         # The exception already reads "invalid PAN '...': reason".
         err.print(Text(str(error), style="err"))
         return 2
-    with GSTClient(cache=_cache_for(args)) as client:
+    # NullCache on purpose: the cache stores taxpayer details, and a PAN
+    # result is a different shape entirely, so nothing here would ever read or
+    # write it. Handing over the disk cache would only imply otherwise.
+    with GSTClient(cache=NullCache()) as client:
         try:
             with _solved_captcha(client, args, pan) as solved:
                 rows = client.fetch_registrations_by_pan(pan, solved)

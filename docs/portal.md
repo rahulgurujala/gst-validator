@@ -20,8 +20,9 @@ the portal is undocumented, so a claim without evidence is marked as such.
 codes for goods (`bzgddtls`); both are parsed into `GoodsOrService`, with
 `is_service` telling them apart.
 
-Only the taxpayer lookup is captcha-gated; see [Access notes](#access-notes)
-for what the portal expects of a client.
+Two endpoints are captcha-gated, the taxpayer lookup and the PAN search; the
+other three answer freely. See [Access notes](#access-notes) for what the
+portal expects of a client.
 
 ## The GSTIN layouts
 
@@ -170,9 +171,10 @@ The portal fingerprints clients: without a browser `User-Agent` and the
 This package sends them.
 
 A captcha is bound to the session that fetched it, so the solved text must be
-submitted on the same client instance. Only the taxpayer lookup needs one; the
-other three endpoints answer without a captcha, and in testing without cookies
-at all.
+submitted on the same client instance, and is single-use: a second lookup, or
+a second PAN, needs a fresh one. The taxpayer lookup and the PAN search are
+the two that need one; the other three endpoints answer without a captcha, and
+in testing without cookies at all.
 
 For unattended or high-volume access, the official
 [GST API](https://developer.gst.gov.in/) through a licensed GSP is the

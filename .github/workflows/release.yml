@@ -108,6 +108,11 @@ jobs:
       - name: Build
         run: uv build
 
+      # CI runs this too. Without it the claim above is not quite true: a
+      # README that will not render on PyPI would reach the upload.
+      - name: Check metadata
+        run: uvx twine check dist/*
+
       - uses: actions/upload-artifact@v7
         with:
           name: dist
