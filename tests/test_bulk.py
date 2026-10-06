@@ -197,3 +197,51 @@ class TestCsvRealWorldQuirks:
         assert main(["-", "--offline", "--column", "gstin", "--format", "csv"]) == 0
         rows = list(csv.DictReader(io.StringIO(capsys.readouterr().out)))
         assert rows[0]["note"] == "a, b\nsecond line"
+
+
+class TestColumnWithoutOffline:
+    """A CSV column is validated, not looked up, and that is said out loud."""
+
+    def test_the_limitation_is_announced(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("sys.stdin", io.StringIO(f"gstin\n{VALID_GSTIN}\n"))
+        assert main(["-", "--column", "gstin", "--format", "jsonl"]) == 0
+        captured = capsys.readouterr()
+        assert "format and checksum only" in captured.err
+        assert json.loads(captured.out)["gstin"] == VALID_GSTIN  # still on stdout
+
+    def test_offline_says_nothing_because_nothing_is_implied(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("sys.stdin", io.StringIO(f"gstin\n{VALID_GSTIN}\n"))
+        assert main(["-", "--offline", "--column", "gstin", "--format", "jsonl"]) == 0
+        assert capsys.readouterr().err == ""
+
+
+class TestBrokenPipe:
+    """`gst-validator ... | head` must not spew a traceback."""
+
+    def test_closing_the_pipe_early_is_quiet(self) -> None:
+        import subprocess
+        import sys
+
+        producer = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "gst_validator",
+                *([VALID_GSTIN] * 200),
+                "--offline",
+                "--format",
+                "jsonl",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        assert producer.stdout is not None
+        producer.stdout.readline()
+        producer.stdout.close()  # the reader goes away, as `head` does
+        _, stderr = producer.communicate()
+        assert b"BrokenPipeError" not in stderr
+        assert b"Traceback" not in stderr

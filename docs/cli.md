@@ -122,6 +122,10 @@ Two details that matter with real spreadsheets:
   (`valid`, `state_name`, and so on), yours is carried through as
   `source_valid`, `source_state_name` and so on, rather than being
   overwritten.
+- `--column` checks format and checksum; it does **not** look each row up on
+  the portal, because a file of five hundred rows would mean five hundred
+  captchas. It says so when you run it. Add `--enrich` for the portal data
+  that needs no captcha.
 
 A row that fails never stops the run: it comes back with `valid: false` and an
 `error`, and the exit code is `2` if any row was bad.
@@ -233,6 +237,7 @@ text with no colour and no wrapping, so they stay byte-exact through a pipe.
 | `1` | A lookup failed: wrong captcha, portal error, network |
 | `2` | At least one input was not a valid GSTIN |
 | `130` | Aborted with Ctrl-C, or stdin closed at a prompt |
+| `141` | The reader closed the pipe, as `head` does. Not an error |
 
 In a batch the worst code wins, so one bad row in a thousand still gives `2`
 while every good row is reported normally.

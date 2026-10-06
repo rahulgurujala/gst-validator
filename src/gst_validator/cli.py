@@ -8,6 +8,7 @@ Progress messages go to stderr for the same reason.
 import argparse
 import csv
 import json
+import os
 import sys
 import tempfile
 from collections.abc import Generator, Iterable, Iterator, Sequence
@@ -535,6 +536,17 @@ def _run_bulk(args: argparse.Namespace, fmt: str) -> int:
     except GSTValidatorError as error:
         err.print(Text.assemble(("input: ", "err"), str(error)))
         return 2
+    if args.column and not (args.offline or args.enrich):
+        # A column is validated, not looked up: a file of five hundred rows
+        # would otherwise mean five hundred captchas. Say so rather than
+        # leaving someone to wonder where the taxpayer data went.
+        err.print(
+            Text(
+                "checking format and checksum only; add --enrich for the portal "
+                "data that needs no captcha",
+                style="label",
+            )
+        )
     if not values:
         err.print(Text("no GSTIN given", style="err"))
         return 2
@@ -584,6 +596,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     except (EOFError, KeyboardInterrupt):
         err.print("[warn]aborted[/]")
         return 130
+    except BrokenPipeError:
+        # `gst-validator ... | head` closes the pipe early, which is normal and
+        # not an error. Python would otherwise print "Exception ignored on
+        # flushing sys.stdout" when it flushes at exit, so stdout is pointed at
+        # the null device first. 141 is the usual 128 + SIGPIPE.
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        return 141
     except OSError as error:
         err.print(Text.assemble(("could not write output: ", "err"), str(error)))
         return 1
