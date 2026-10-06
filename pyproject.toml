@@ -59,6 +59,14 @@ Issues = "https://github.com/rahulgurujala/gst-validator/issues"
 [project.scripts]
 gst-validator = "gst_validator.cli:main"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Fail on an unknown marker or a malformed config rather than ignoring it, and
+# treat warnings as errors so a deprecation in a dependency surfaces here
+# first rather than breaking a release later.
+addopts = "--strict-markers --strict-config"
+filterwarnings = ["error"]
+
 [tool.mypy]
 python_version = "3.13"
 strict = true
