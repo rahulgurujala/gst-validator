@@ -16,7 +16,7 @@ from contextlib import contextmanager, redirect_stdout
 from dataclasses import asdict, is_dataclass
 from importlib.metadata import version
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Final, cast
 
 from rich.console import Console
 from rich.table import Table
@@ -906,7 +906,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     rather than exits, so it can be called from Python as well as installed as
     the ``gst-validator`` script.
     """
-    args = _parser().parse_args(argv)
+    parser = _parser()
+    args = parser.parse_args(argv)
     if args.no_color:
         out.no_color = err.no_color = True
     fmt = _chosen_format(args)
@@ -915,6 +916,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         removed = DiskCache().clear()
         err.print(Text(f"cleared {removed} cached lookup(s)", style="label"))
         return 0
+
+    problem = _check_flags(args, parser)
+    if problem is not None:
+        err.print(Text(problem, style="err"))
+        return 2
 
     try:
         with _destination(args.output):
@@ -933,6 +939,49 @@ def main(argv: Sequence[str] | None = None) -> int:
     except OSError as error:
         err.print(Text.assemble(("could not write output: ", "err"), str(error)))
         return 1
+
+
+# The mode each flag belongs to. A mode is picked by one of the flags in
+# _MODES, or none of them for the ordinary GSTIN lookup, which is `None` here.
+# A flag set outside its mode would otherwise be accepted and ignored, which
+# reads as the command having done something it did not.
+_MODES: Final = ("pan", "hsn", "practitioner", "composition", "arn", "rfn", "temp_id")
+_BELONGS_TO: Final[dict[str, tuple[str | None, ...]]] = {
+    "offline": (None,),
+    "column": (None,),
+    "enrich": (None,),
+    "details_only": (None,),
+    "refresh": (None,),
+    "by": ("hsn",),
+    "services": ("hsn",),
+    "enrolment": ("practitioner",),
+    "pincode": ("practitioner",),
+    "state": ("practitioner", "composition"),
+    "year": ("composition",),
+    "opted_out": ("composition",),
+}
+
+
+def _flag(dest: str) -> str:
+    """The spelling a reader typed, from the attribute argparse stored it in."""
+    return "--" + dest.replace("_", "-")
+
+
+def _check_flags(args: argparse.Namespace, parser: argparse.ArgumentParser) -> str | None:
+    """Report a mode clash or a flag that does not apply, else ``None``."""
+    chosen = [name for name in _MODES if getattr(args, name)]
+    if len(chosen) > 1:
+        return "pick one of " + ", ".join(_flag(name) for name in chosen)
+    mode = chosen[0] if chosen else None
+    stray = [
+        _flag(dest)
+        for dest, modes in _BELONGS_TO.items()
+        if getattr(args, dest) != parser.get_default(dest) and mode not in modes
+    ]
+    if stray:
+        where = _flag(mode) if mode else "a plain GSTIN lookup"
+        return f"{', '.join(sorted(stray))} does not apply to {where}"
+    return None
 
 
 def _dispatch(args: argparse.Namespace, fmt: str) -> int:

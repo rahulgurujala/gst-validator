@@ -330,6 +330,25 @@ gst-validator - --offline --format csv < in.csv | column -t -s,
 Only `table` is styled. `json`, `jsonl`, `csv` and `raw` are written as plain
 text with no colour and no wrapping, so they stay byte-exact through a pipe.
 
+## One mode at a time
+
+Each search is its own mode, and a flag belonging to another one is refused
+rather than quietly ignored:
+
+```bash
+$ gst-validator --pan AAACR5055K --offline
+--offline does not apply to --pan          # exit 2, no captcha spent
+
+$ gst-validator --pan AAACR5055K --hsn 3926
+pick one of --pan, --hsn                   # exit 2
+```
+
+`--format`, `-o`, `--no-color` and the captcha flags apply everywhere. The
+rest belong to one mode: `--offline`, `--column`, `--enrich`, `--details-only`
+and `--refresh` to a plain GSTIN lookup, `--by` and `--services` to `--hsn`,
+`--enrolment` and `--pincode` to `--practitioner`, `--year` and `--opted-out`
+to `--composition`, and `--state` to either of the last two.
+
 ## Exit codes
 
 | Code | Meaning |

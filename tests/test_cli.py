@@ -550,3 +550,44 @@ class TestRawFormatHonesty:
         captured = capsys.readouterr()
         assert json.loads(captured.out) == PAYLOAD
         assert "keeps no raw body" not in captured.err
+
+
+class TestFlagsThatDoNotApply:
+    """A flag outside its mode is refused, not quietly ignored.
+
+    `--pan --offline` used to run a captcha lookup: `--offline` was accepted
+    and had no effect, so the command did the opposite of what was asked.
+    """
+
+    def test_offline_does_not_apply_to_a_pan_search(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def refuse(*_args: object, **_kwargs: object) -> str:  # pragma: no cover
+            raise AssertionError("no captcha should be requested")
+
+        monkeypatch.setattr("builtins.input", refuse)
+        assert main(["--pan", "AAACR5055K", "--offline"]) == 2
+        assert "--offline does not apply to --pan" in capsys.readouterr().err
+
+    def test_two_modes_at_once_are_refused(self, capsys: pytest.CaptureFixture[str]) -> None:
+        assert main(["--pan", "AAACR5055K", "--hsn", "3926"]) == 2
+        assert "pick one of" in capsys.readouterr().err
+
+    def test_a_modifier_from_another_search(self, capsys: pytest.CaptureFixture[str]) -> None:
+        assert main(["--practitioner", "--state", "35", "--year", "2025-2026"]) == 2
+        assert "--year does not apply" in capsys.readouterr().err
+
+    def test_bulk_flags_do_not_apply_to_a_single_answer(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert main(["--arn", "AA270125000000X", "--column", "gstin"]) == 2
+        assert "--column does not apply" in capsys.readouterr().err
+
+    def test_a_default_valued_flag_is_not_mistaken_for_one_that_was_given(self) -> None:
+        """`--by` defaults to "code", which is truthy: comparing against the
+        parser default rather than truthiness is what keeps this quiet."""
+        assert main([VALID_GSTIN, "--offline", "--json"]) == 0
+
+    def test_every_legitimate_combination_still_runs(self) -> None:
+        assert main([VALID_GSTIN, "--offline", "--format", "csv"]) == 0
+        assert main([VALID_GSTIN, PUBLIC_GSTIN, "--offline", "--json"]) == 0
