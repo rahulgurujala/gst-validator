@@ -158,3 +158,42 @@ class TestOutputFile:
         target = Path(str(tmp_path)) / "out.txt"
         assert main([VALID_GSTIN, "--offline", "-o", str(target)]) == 0
         assert "Maharashtra" in target.read_text()
+
+
+class TestCsvRealWorldQuirks:
+    """Two things a spreadsheet actually does that a naive reader gets wrong."""
+
+    def test_a_byte_order_mark_does_not_hide_the_column(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Excel writes a BOM, which would make the first column "﻿gstin"."""
+        monkeypatch.setattr("sys.stdin", io.StringIO(f"﻿gstin,name\n{VALID_GSTIN},A Ltd\n"))
+        assert main(["-", "--offline", "--column", "gstin", "--format", "jsonl"]) == 0
+        row = json.loads(capsys.readouterr().out)
+        assert row["gstin"] == VALID_GSTIN
+        assert row["name"] == "A Ltd"
+
+    def test_a_clashing_column_is_kept_not_overwritten(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Their "valid" column must survive beside the one we compute."""
+        monkeypatch.setattr(
+            "sys.stdin",
+            io.StringIO(f"gstin,valid,state_name\n{VALID_GSTIN},maybe,Narnia\n"),
+        )
+        assert main(["-", "--offline", "--column", "gstin", "--format", "jsonl"]) == 0
+        row = json.loads(capsys.readouterr().out)
+        assert row["valid"] is True  # ours, computed
+        assert row["source_valid"] == "maybe"  # theirs, preserved
+        assert row["state_name"] == "Maharashtra"
+        assert row["source_state_name"] == "Narnia"
+
+    def test_quoted_commas_and_newlines_survive_the_round_trip(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            "sys.stdin", io.StringIO(f'gstin,note\n{VALID_GSTIN},"a, b\nsecond line"\n')
+        )
+        assert main(["-", "--offline", "--column", "gstin", "--format", "csv"]) == 0
+        rows = list(csv.DictReader(io.StringIO(capsys.readouterr().out)))
+        assert rows[0]["note"] == "a, b\nsecond line"

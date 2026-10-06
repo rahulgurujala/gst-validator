@@ -14,7 +14,7 @@ from collections.abc import Generator, Iterable, Iterator, Sequence
 from contextlib import contextmanager, redirect_stdout
 from importlib.metadata import version
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Final, cast
 
 from rich.console import Console
 from rich.table import Table
@@ -208,6 +208,11 @@ def _destination(path: Path | None) -> Generator[None]:
     err.print(Text.assemble(("written to ", "label"), (str(path), "accent")))
 
 
+# The keys ValidationResult.as_dict() always produces; an input column sharing
+# one of these names is carried through as "source_<name>".
+_RESULT_KEYS: Final = frozenset(ValidationResult(value="x").as_dict())
+
+
 def _chosen_format(args: argparse.Namespace) -> str:
     """--format wins; --json and --raw stay as the shorthands they always were."""
     if args.format:
@@ -287,6 +292,22 @@ def _print_detail(row: ValidationResult) -> None:
         out.print(table)
 
 
+def _emit_results_table(rows: Sequence[ValidationResult]) -> None:
+    """Human output: results on stdout, problems on stderr.
+
+    One input gets the detailed view it has always had; a batch gets a line
+    each, which is what you want when scanning a column.
+    """
+    for row in rows:
+        if row.gstin is None:
+            err.print(Text.assemble(("invalid GSTIN ", "err"), f"{row.value!r}: {row.error}"))
+    valid = [row for row in rows if row.gstin is not None]
+    if len(valid) == 1 and len(rows) == 1:
+        _print_detail(valid[0])
+    elif valid:
+        out.print(_results_table(valid))
+
+
 def _emit_results(rows: Sequence[ValidationResult], fmt: str) -> None:
     """Render a bulk offline run in the requested format."""
     payloads = [row.as_dict() for row in rows]
@@ -296,28 +317,11 @@ def _emit_results(rows: Sequence[ValidationResult], fmt: str) -> None:
         case "jsonl":
             for payload in payloads:
                 print(json.dumps(payload, ensure_ascii=False))
-        case "json":
-            print(
-                json.dumps(
-                    payloads if len(payloads) != 1 else payloads[0], indent=2, ensure_ascii=False
-                )
-            )
-        case "raw":
-            print(json.dumps(payloads, indent=2, ensure_ascii=False))
+        case "json" | "raw":
+            single = payloads[0] if len(payloads) == 1 else payloads
+            print(json.dumps(single, indent=2, ensure_ascii=False))
         case _:
-            # Human output: results on stdout, problems on stderr. One input
-            # gets the detailed view it has always had; a batch gets a line
-            # each, which is what you want when scanning a column.
-            valid = [row for row in rows if row.gstin is not None]
-            for row in rows:
-                if row.gstin is None:
-                    err.print(
-                        Text.assemble(("invalid GSTIN ", "err"), f"{row.value!r}: {row.error}")
-                    )
-            if len(valid) == 1 and len(rows) == 1:
-                _print_detail(valid[0])
-            elif valid:
-                out.print(_results_table(valid))
+            _emit_results_table(rows)
 
 
 def _offline_fields(gstin: GSTIN) -> dict[str, object]:
@@ -476,8 +480,14 @@ def _read_gstins(values: Sequence[str]) -> Iterator[str]:
 
 
 def _read_csv(column: str) -> tuple[list[str], list[dict[str, str]]]:
-    """Take one column of a CSV on stdin, carrying the other fields through."""
+    """Take one column of a CSV on stdin, carrying the other fields through.
+
+    A spreadsheet exported from Excel begins with a byte-order mark, which
+    would otherwise make the first column "﻿gstin" and never match.
+    """
     reader = csv.DictReader(sys.stdin)
+    if reader.fieldnames is not None:
+        reader.fieldnames = [name.lstrip("﻿") for name in reader.fieldnames]
     if reader.fieldnames is None or column not in reader.fieldnames:
         found = ", ".join(reader.fieldnames or []) or "none"
         message = f"no column {column!r} in the input; found: {found}"
@@ -489,7 +499,15 @@ def _read_csv(column: str) -> tuple[list[str], list[dict[str, str]]]:
         if not value:
             continue
         values.append(value)
-        extras.append({k: v for k, v in record.items() if k != column and v is not None})
+        # A column of theirs sharing a name with one of ours would otherwise be
+        # overwritten silently, so it is carried beside it instead.
+        extras.append(
+            {
+                (f"source_{key}" if key in _RESULT_KEYS else key): item
+                for key, item in record.items()
+                if key != column and item is not None
+            }
+        )
     return values, extras
 
 
@@ -503,13 +521,17 @@ def _cache_for(args: argparse.Namespace) -> TaxpayerCache:
     return NullCache() if args.no_cache else DiskCache()
 
 
+def _collect_inputs(args: argparse.Namespace) -> tuple[list[str], list[dict[str, str]]]:
+    """The GSTINs to work on, with any other CSV columns to carry through."""
+    if args.column:
+        return _read_csv(args.column)
+    return list(_read_gstins(args.gstin)), []
+
+
 def _run_bulk(args: argparse.Namespace, fmt: str) -> int:
     """Offline validation of many inputs, optionally enriched, in one pass."""
     try:
-        if args.column:
-            values, extras = _read_csv(args.column)
-        else:
-            values, extras = list(_read_gstins(args.gstin)), []
+        values, extras = _collect_inputs(args)
     except GSTValidatorError as error:
         err.print(Text.assemble(("input: ", "err"), str(error)))
         return 2
@@ -530,14 +552,18 @@ def _run_bulk(args: argparse.Namespace, fmt: str) -> int:
 
     collected = list(rows)
     _emit_results(collected, fmt)
-    invalid = [row for row in collected if not row.is_valid]
+    return _bulk_exit_code(collected, fmt)
+
+
+def _bulk_exit_code(rows: Sequence[ValidationResult], fmt: str) -> int:
+    """2 if anything failed to parse, with a count on stderr for a batch."""
+    invalid = [row for row in rows if not row.is_valid]
     if not invalid:
         return 0
-    if fmt != "table":
-        # The table renderer already named each bad row on stderr.
-        err.print(Text(f"{len(invalid)} of {len(collected)} inputs were invalid", style="err"))
-    elif len(collected) > 1:
-        err.print(Text(f"{len(invalid)} of {len(collected)} inputs were invalid", style="err"))
+    # The table renderer has already named each bad row, so a single input
+    # needs nothing further; a batch still deserves the tally.
+    if fmt != "table" or len(rows) > 1:
+        err.print(Text(f"{len(invalid)} of {len(rows)} inputs were invalid", style="err"))
     return 2
 
 

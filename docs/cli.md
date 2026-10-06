@@ -114,6 +114,15 @@ other field in the row is carried into the output, so the result lines up with
 what you started from. Blank cells are skipped, and a missing column is
 reported rather than guessed at.
 
+Two details that matter with real spreadsheets:
+
+- A file exported from Excel starts with a byte-order mark. It is stripped, so
+  `--column gstin` matches whether or not the mark is there.
+- If one of your columns is named the same as one of the computed ones
+  (`valid`, `state_name`, and so on), yours is carried through as
+  `source_valid`, `source_state_name` and so on, rather than being
+  overwritten.
+
 A row that fails never stops the run: it comes back with `valid: false` and an
 `error`, and the exit code is `2` if any row was bad.
 
