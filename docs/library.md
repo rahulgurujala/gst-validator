@@ -32,35 +32,10 @@ from gst_validator import (
 )
 ```
 
-Every public type is a frozen dataclass, so results are hashable, comparable
-and safe to share between threads. The package ships `py.typed`, and is
-checked under both mypy and pyright in strict mode.
-
-Everything is importable from the package root:
-
-```python
-from gst_validator import (
-    GSTIN,
-    Captcha,
-    GSTClient,
-    AsyncGSTClient,
-    TaxpayerDetails,
-    TaxpayerProfile,
-    Address,
-    Jurisdiction,
-    GoodsOrService,
-    FinancialYear,
-    FilingPreference,
-    TTLCache,
-    NullCache,
-    DEFAULT_CACHE,
-    TaxpayerCache,
-    GSTValidatorError,
-    InvalidGSTINError,
-    CaptchaError,
-    TaxpayerLookupError,
-)
-```
+Every type that carries a result is a frozen dataclass, so those values are
+hashable, comparable and safe to share between threads; the clients and caches
+are ordinary objects with their own lifecycles. The package ships `py.typed`
+and is checked under both mypy and pyright in strict mode.
 
 ## 1. Validate a GSTIN (no network, no captcha)
 
