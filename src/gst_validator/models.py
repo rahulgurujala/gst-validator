@@ -29,12 +29,21 @@ type StrPath = str | os.PathLike[str]
 # deductor under section 51 and "C" for a TCS collector under section 52, so
 # it cannot be pinned to "Z": that rejected valid government and e-commerce
 # registrations outright. The checksum remains the real guard against typos.
-# Characters 3-12 hold the holder's PAN (AAAAA9999A), or a TAN (AAAA99999A)
-# for a tax deductor registered without one, so both shapes are accepted.
+# Characters 3-12 hold the holder's PAN (AAAAA9999A). A deductor with no PAN
+# registers against its TAN (AAAA99999A) instead, per the portal's own
+# registration guide, so that shape is accepted too - though every deductor
+# registration seen so far has in fact been PAN-based, so the TAN layout is
+# accepted on the strength of the documentation rather than an observation.
 _PAN_SHAPE: Final = re.compile(r"^[A-Z]{5}[0-9]{4}[A-Z]$")
 _GSTIN_PATTERN: Final = re.compile(
     r"^[0-9]{2}(?:[A-Z]{5}[0-9]{4}[A-Z]|[A-Z]{4}[0-9]{5}[A-Z])[1-9A-Z][A-Z][0-9A-Z]$"
 )
+
+# A non-resident provider of online services (OIDAR) gets a different layout
+# altogether: "99", the two-digit year of registration, a three-letter country
+# code, a five-digit serial and a two-letter service code, as in GoDaddy's
+# 9917USA29016OS6. The mod-36 check digit is computed the same way.
+_NON_RESIDENT_PATTERN: Final = re.compile(r"^99[0-9]{2}[A-Z]{3}[0-9]{5}[A-Z]{2}[0-9A-Z]$")
 _CHECKSUM_ALPHABET: Final = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 _DATE_FORMATS: Final = ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d")
 
@@ -159,7 +168,9 @@ class GSTIN:
     value: str
 
     def __post_init__(self) -> None:
-        if not _GSTIN_PATTERN.fullmatch(self.value):
+        if not (
+            _GSTIN_PATTERN.fullmatch(self.value) or _NON_RESIDENT_PATTERN.fullmatch(self.value)
+        ):
             raise InvalidGSTINError(self.value, "does not match the GSTIN format")
         if self.value[-1] != self._checksum(self.value[:14]):
             raise InvalidGSTINError(self.value, "checksum digit mismatch")
@@ -188,22 +199,44 @@ class GSTIN:
         return _CHECKSUM_ALPHABET[(36 - total % 36) % 36]
 
     @property
+    def is_non_resident(self) -> bool:
+        """True for the OIDAR layout issued to overseas service providers."""
+        return _NON_RESIDENT_PATTERN.fullmatch(self.value) is not None
+
+    @property
     def state_code(self) -> str:
         return self.value[:2]
 
     @property
     def state_name(self) -> str | None:
-        return _STATE_NAMES.get(self.state_code)
+        """``None`` for a non-resident, which carries a country rather than a state."""
+        return None if self.is_non_resident else _STATE_NAMES.get(self.state_code)
 
     @property
-    def identifier(self) -> str:
-        """Characters 3-12: a PAN, or a TAN for a deductor registered without one."""
-        return self.value[2:12]
+    def country_code(self) -> str | None:
+        """Characters 5-7 of a non-resident GSTIN, such as ``"USA"``."""
+        return self.value[4:7] if self.is_non_resident else None
 
     @property
-    def identifier_type(self) -> str:
-        """``"PAN"`` or ``"TAN"``, told apart by the shape of those characters."""
-        return "PAN" if _PAN_SHAPE.fullmatch(self.identifier) else "TAN"
+    def registration_year(self) -> int | None:
+        """Characters 3-4 of a non-resident GSTIN, as a four-digit year."""
+        return 2000 + int(self.value[2:4]) if self.is_non_resident else None
+
+    @property
+    def identifier(self) -> str | None:
+        """Characters 3-12: a PAN, or a TAN for a deductor registered without one.
+
+        ``None`` for a non-resident, whose GSTIN carries neither.
+        """
+        return None if self.is_non_resident else self.value[2:12]
+
+    @property
+    def identifier_type(self) -> str | None:
+        """``"PAN"`` or ``"TAN"``, told apart by shape; ``None`` for a non-resident."""
+        identifier = self.identifier
+        if identifier is None:
+            return None
+        return "PAN" if _PAN_SHAPE.fullmatch(identifier) else "TAN"
 
     @property
     def pan(self) -> str | None:
@@ -222,19 +255,25 @@ class GSTIN:
         return _PAN_ENTITY_TYPES.get(pan[3]) if pan is not None else None
 
     @property
-    def registration_sequence(self) -> str:
+    def registration_sequence(self) -> str | None:
         """13th character: the Nth registration of this PAN in this state."""
-        return self.value[12]
+        return None if self.is_non_resident else self.value[12]
 
     @property
     def registration_type(self) -> str | None:
-        """14th character: "Z" ordinarily, "D" for TDS, "C" for TCS."""
-        return _REGISTRATION_TYPES.get(self.value[13])
+        """14th character: "Z" ordinarily, "D" for TDS, "C" for TCS.
+
+        Both exceptions are confirmed against the live portal: Amazon Seller
+        Services holds "C" registrations beside ordinary "Z" ones, and NTPC and
+        Indian Oil hold "D" registrations beside theirs. An unrecognised letter
+        is left unlabelled rather than guessed at.
+        """
+        return None if self.is_non_resident else _REGISTRATION_TYPES.get(self.value[13])
 
     @property
     def is_regular(self) -> bool:
-        """False for a TDS deductor or a TCS collector registration."""
-        return self.value[13] == "Z"
+        """False for a non-resident, a TDS deductor or a TCS collector."""
+        return not self.is_non_resident and self.value[13] == "Z"
 
     def __str__(self) -> str:
         return self.value

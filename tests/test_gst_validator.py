@@ -11,6 +11,7 @@ from collections.abc import Callable, Coroutine
 from datetime import date
 from importlib import metadata
 from pathlib import Path
+from typing import ClassVar
 
 import httpx
 import pytest
@@ -1076,4 +1077,74 @@ class TestTanBasedGstin:
         payload = json.loads(capsys.readouterr().out)
         assert payload["identifier_type"] == "TAN"
         assert payload["tan"] == "MUMA12345B"
+        assert payload["pan"] is None
+
+
+class TestRealWorldLayouts:
+    """Published registrations of large companies, confirmed against the portal.
+
+    Each of these was rejected by an earlier version of the pattern. They are
+    public corporate registrations, printed on the invoices these companies
+    issue, not anyone's personal data.
+    """
+
+    # Amazon Seller Services collects TCS under section 52: character 14 is C.
+    AMAZON_TCS: ClassVar[list[str]] = ["27AAICA3918J1CT", "18AAICA3918J1CS", "03AAICA3918J2C2"]
+    # The same company's ordinary registrations in other states.
+    AMAZON_REGULAR: ClassVar[list[str]] = ["37AAICA3918J1ZH", "29AAICA3918J3ZC"]
+    # Public-sector bodies that deduct TDS under section 51: character 14 is D.
+    DEDUCTORS: ClassVar[list[str]] = ["07AAACN0255D1D9", "27AAACI1681G1DY"]
+    # Non-resident providers of online services, a different layout entirely.
+    NON_RESIDENT: ClassVar[dict[str, tuple[str, int]]] = {
+        "9917USA29016OS6": ("USA", 2017),
+        "9923USA29044OSE": ("USA", 2023),
+        "9924ISR29001OSH": ("ISR", 2024),
+    }
+
+    def test_tcs_collector_registrations(self) -> None:
+        for value in self.AMAZON_TCS:
+            gstin = GSTIN.parse(value)
+            assert gstin.registration_type == "TCS collector"
+            assert not gstin.is_regular
+            assert gstin.pan == "AAICA3918J"
+
+    def test_tds_deductor_registrations(self) -> None:
+        for value in self.DEDUCTORS:
+            gstin = GSTIN.parse(value)
+            assert gstin.registration_type == "TDS deductor"
+            assert not gstin.is_regular
+
+    def test_same_company_mixes_regular_and_collector(self) -> None:
+        """One PAN, several states, two kinds of registration."""
+        pans = {GSTIN.parse(v).pan for v in self.AMAZON_TCS + self.AMAZON_REGULAR}
+        assert pans == {"AAICA3918J"}
+        assert {GSTIN.parse(v).registration_type for v in self.AMAZON_REGULAR} == {"Regular"}
+
+    def test_non_resident_layout(self) -> None:
+        for value, (country, year) in self.NON_RESIDENT.items():
+            gstin = GSTIN.parse(value)
+            assert gstin.is_non_resident
+            assert gstin.country_code == country
+            assert gstin.registration_year == year
+            # None of the PAN-based fields apply to this layout.
+            assert gstin.pan is None
+            assert gstin.tan is None
+            assert gstin.identifier is None
+            assert gstin.identifier_type is None
+            assert gstin.state_name is None
+            assert gstin.registration_sequence is None
+            assert gstin.registration_type is None
+            assert not gstin.is_regular
+
+    def test_the_one_checksum_covers_every_layout(self) -> None:
+        """The same mod-36 digit validates all of them, which is why they parse."""
+        every = self.AMAZON_TCS + self.AMAZON_REGULAR + self.DEDUCTORS + list(self.NON_RESIDENT)
+        for value in every:
+            assert GSTIN.is_valid(value), value
+            assert not GSTIN.is_valid(value[:-1] + ("A" if value[-1] != "A" else "B"))
+
+    def test_offline_json_for_a_non_resident(self, capsys: pytest.CaptureFixture[str]) -> None:
+        assert main(["9917USA29016OS6", "--offline", "--json"]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["valid"] is True
         assert payload["pan"] is None
