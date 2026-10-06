@@ -1,6 +1,6 @@
 """Validate GSTINs and fetch taxpayer details from the Indian GST portal."""
 
-from .cache import DEFAULT_CACHE, NullCache, TaxpayerCache, TTLCache
+from .cache import DEFAULT_CACHE, DiskCache, NullCache, TaxpayerCache, TTLCache
 from .cli import main
 from .client import AsyncGSTClient, GSTClient
 from .exceptions import (
@@ -28,6 +28,7 @@ __all__ = [
     "AsyncGSTClient",
     "Captcha",
     "CaptchaError",
+    "DiskCache",
     "FilingPreference",
     "FinancialYear",
     "GSTClient",
