@@ -66,15 +66,6 @@ return `"NA"` for null, `dd/mm/yyyy` for dates, two different shapes for the
 same field, and HTTP 200 for errors. This package absorbs that so your code
 sees `datetime.date`, `None` and exceptions.
 
-| | |
-|---|---|
-| **Offline validation** | Format and mod-36 checksum, plus state, PAN or TAN, entity and registration type decoded from the number |
-| **Typed objects** | Dates parsed, `"NA"` / `""` / `null` normalised, nothing silently dropped |
-| **Captcha, your way** | Raw bytes, base64 or a `data:` URI, so a browser, a human or a service can solve it |
-| **Three free endpoints** | HSN/SAC codes, financial years and filing preferences need no captcha at all |
-| **Sync and async** | The same API with `await`, both strict-typed and `py.typed` |
-| **Caching built in** | A lookup costs a human-solved captcha, so results are cached by default |
-
 ## What it does
 
 | | |
@@ -147,7 +138,7 @@ Then read the [CLI guide](docs/cli.md) or the
 
 ```bash
 uv sync              # install, including dev dependencies
-uv run pytest        # 175 tests, fully offline via httpx.MockTransport
+uv run pytest        # fully offline, via httpx.MockTransport
 uv run mypy          # strict
 uv run pyright       # strict
 uv run ruff check .
@@ -155,12 +146,18 @@ uv run ruff check .
 
 Tests parse payloads with the exact shape the live portal returns
 (`tests/fixtures/`: a service provider, a manufacturer, a statutory body, a
-cancelled registration and a goods list, with the
-identifying values replaced by fictional ones) and assert `unmapped == {}`,
-so a portal schema change fails the suite instead of quietly losing data.
+cancelled registration, a composition dealer, a UIN holder and a goods list)
+and assert `unmapped == {}`, so a portal schema change fails the suite
+instead of quietly losing data.
 
-All GSTINs in this README and in the tests are fictional placeholders built
-on the dummy PAN `AAACR5055K`; they are checksum-valid but belong to nobody.
+The GSTINs used here and in the tests are of two kinds, both deliberate. Some
+are real, published registrations of large organisations - `27AAACR5055K1Z7`
+is Reliance Industries, and the suite also covers ones belonging to Amazon,
+Indian Railways, GoDaddy and UNICEF - which are printed on the invoices those
+bodies issue and are corporate records, not anyone's personal data. The rest
+are invented and checksum-valid, used wherever a payload had to be made up.
+No individual's registration appears anywhere in the repository, and the
+fixtures captured from live lookups have their identifying values replaced.
 
 ## Releasing
 

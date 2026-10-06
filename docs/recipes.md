@@ -6,7 +6,7 @@ Whole tasks, start to finish. Each one is runnable as written.
 
 The common case: a CSV with a GSTIN column, and you want to know which are
 malformed before anything reaches your accounts system. No captcha, no portal,
-no rate limit — this is pure arithmetic.
+no rate limit - this is pure arithmetic.
 
 ```bash
 gst-validator - --offline --column gstin --format csv < suppliers.csv > checked.csv
@@ -90,8 +90,8 @@ It writes the captcha image to a temporary file, prints the path, waits for
 you to type what it says, then prints the taxpayer. The image is deleted once
 you have entered it.
 
-To solve it somewhere else — a browser, another screen, a person in a
-different room — ask for the image as a `data:` URI instead:
+To solve it somewhere else - a browser, another screen, a person in a
+different room - ask for the image as a `data:` URI instead:
 
 ```bash
 gst-validator 27AAACR5055K1Z7 --captcha-base64 --json -o taxpayer.json
@@ -167,7 +167,7 @@ gst-validator 27AAACR5055K1Z7 --raw | jq 'keys'
 ```
 
 In Python, `TaxpayerDetails.raw` is always the untouched payload, and
-`unmapped` is every key this package does not model yet — if that is not
+`unmapped` is every key this package does not model yet - if that is not
 empty, the portal has grown a field:
 
 ```python

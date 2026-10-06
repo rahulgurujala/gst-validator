@@ -19,14 +19,8 @@ the portal is undocumented, so a claim without evidence is marked as such.
 codes for goods (`bzgddtls`); both are parsed into `GoodsOrService`, with
 `is_service` telling them apart.
 
-The portal fingerprints clients, so the package sends a browser `User-Agent`
-and the `Referer`/`Origin` headers the site expects; without them the captcha
-request is reset. For unattended or high-volume use, the official
-[GST API](https://developer.gst.gov.in/) through a licensed GSP is the
-supported route; this package drives the public, captcha-gated search.
-
----
-
+Only the taxpayer lookup is captcha-gated; see [Access notes](#access-notes)
+for what the portal expects of a client.
 
 ## The GSTIN layouts
 
@@ -88,7 +82,7 @@ date.
 **`dty`**: `Regular`, `Composition`, `United Nation Body`.
 
 **`ntcrbs`** (core business activity): `SPO` is "Service Provider and Others"
-and `MFT` is "Manufacturer" — note `MFT`, not the `MFR` the name suggests.
+and `MFT` is "Manufacturer" - note `MFT`, not the `MFR` the name suggests.
 The trader code has not been observed, so it is not mapped. An unknown code
 passes through unchanged rather than being guessed at.
 

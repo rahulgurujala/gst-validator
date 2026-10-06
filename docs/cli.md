@@ -139,7 +139,8 @@ Two details that matter with real spreadsheets:
 - `--column` checks format and checksum; it does **not** look each row up on
   the portal, because a file of five hundred rows would mean five hundred
   captchas. It says so when you run it. Add `--enrich` for the portal data
-  that needs no captcha.
+  that needs no captcha - that one does call the portal, just without ever
+  asking you to solve anything.
 
 A row that fails never stops the run: it comes back with `valid: false` and an
 `error`, and the exit code is `2` if any row was bad.
@@ -196,12 +197,12 @@ Also runnable as a module: `python -m gst_validator 27AAACR5055K1Z7`.
 
 | Flag | What it does |
 |---|---|
-| `--offline` | Validate format and checksum only; never touches the network |
+| `--offline` | Validate format and checksum only, with no captcha lookup |
 | `-f`, `--format` | `table`, `json`, `jsonl`, `csv` or `raw` |
 | `--json` / `--raw` | Shorthands for `--format json` / `--format raw` |
 | `-o`, `--output PATH` | Write the result to a file instead of stdout |
 | `--column NAME` | Read the input as CSV and take GSTINs from this column |
-| `--enrich` | Add the captcha-free portal data to each row |
+| `--enrich` | Add the captcha-free portal data to each row; needs the network, even alongside `--offline` |
 | `--details-only` | Skip the captcha-free extras on a full lookup |
 | `--refresh` | Ignore any cached result and look up afresh |
 | `--no-cache` | Neither read nor write the on-disk cache |

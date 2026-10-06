@@ -315,9 +315,6 @@ The portal answers rejections with HTTP 200 and a body carrying an
 is what marks a failed lookup. One `except GSTValidatorError` catches
 everything this package raises; `httpx` errors are wrapped, never leaked.
 
----
-
-
 ## What you get back
 
 ### `TaxpayerProfile`
@@ -368,8 +365,6 @@ Helpers: `is_active`, `is_cancelled`, `addresses` (principal first),
 `as_dict()`, and `unmapped`, which lists portal keys this class does not model, so a new
 portal field is never silently dropped.
 
-`Address` carries split fields (`building_name`, `street`, `pincode`, …) *and*
+`Address` carries split fields (`building_name`, `street`, `pincode`, ...) *and*
 `full`: the portal usually sends the principal address as one `adr` string, so
 `as_line()` returns whichever form arrived.
-
----
