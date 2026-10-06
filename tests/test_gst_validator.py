@@ -1093,7 +1093,17 @@ class TestRealWorldLayouts:
     # The same company's ordinary registrations in other states.
     AMAZON_REGULAR: ClassVar[list[str]] = ["37AAICA3918J1ZH", "29AAICA3918J3ZC"]
     # Public-sector bodies that deduct TDS under section 51: character 14 is D.
-    DEDUCTORS: ClassVar[list[str]] = ["07AAACN0255D1D9", "27AAACI1681G1DY"]
+    # NTPC, Indian Oil, and Indian Railways in three southern states.
+    DEDUCTORS: ClassVar[list[str]] = [
+        "07AAACN0255D1D9",
+        "27AAACI1681G1DY",
+        "32AAAGM0289C1D1",
+        "33AAAGM0289C1DZ",
+        "34AAAGM0289C1DX",
+    ]
+    # Indian Railways' ordinary registrations, published on its own site. The
+    # 4th PAN character is G, the only Government example we have seen live.
+    RAILWAYS: ClassVar[list[str]] = ["32AAAGM0289C1ZS", "33AAAGM0289C1ZQ", "34AAAGM0289C1ZO"]
     # Non-resident providers of online services, a different layout entirely.
     NON_RESIDENT: ClassVar[dict[str, tuple[str, int]]] = {
         "9917USA29016OS6": ("USA", 2017),
@@ -1120,6 +1130,22 @@ class TestRealWorldLayouts:
         assert pans == {"AAICA3918J"}
         assert {GSTIN.parse(v).registration_type for v in self.AMAZON_REGULAR} == {"Regular"}
 
+    def test_government_entity_type(self) -> None:
+        for value in self.RAILWAYS:
+            gstin = GSTIN.parse(value)
+            assert gstin.entity_type == "Government"
+            assert gstin.pan == "AAAGM0289C"
+            assert gstin.is_regular
+
+    def test_one_body_holds_both_an_ordinary_and_a_deductor_registration(self) -> None:
+        """Indian Railways, same PAN and state, differing only in character 14."""
+        ordinary = GSTIN.parse("33AAAGM0289C1ZQ")
+        deductor = GSTIN.parse("33AAAGM0289C1DZ")
+        assert ordinary.pan == deductor.pan
+        assert ordinary.state_name == deductor.state_name == "Tamil Nadu"
+        assert ordinary.registration_type == "Regular"
+        assert deductor.registration_type == "TDS deductor"
+
     def test_non_resident_layout(self) -> None:
         for value, (country, year) in self.NON_RESIDENT.items():
             gstin = GSTIN.parse(value)
@@ -1138,7 +1164,13 @@ class TestRealWorldLayouts:
 
     def test_the_one_checksum_covers_every_layout(self) -> None:
         """The same mod-36 digit validates all of them, which is why they parse."""
-        every = self.AMAZON_TCS + self.AMAZON_REGULAR + self.DEDUCTORS + list(self.NON_RESIDENT)
+        every = (
+            self.AMAZON_TCS
+            + self.AMAZON_REGULAR
+            + self.DEDUCTORS
+            + self.RAILWAYS
+            + list(self.NON_RESIDENT)
+        )
         for value in every:
             assert GSTIN.is_valid(value), value
             assert not GSTIN.is_valid(value[:-1] + ("A" if value[-1] != "A" else "B"))

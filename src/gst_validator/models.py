@@ -29,11 +29,13 @@ type StrPath = str | os.PathLike[str]
 # deductor under section 51 and "C" for a TCS collector under section 52, so
 # it cannot be pinned to "Z": that rejected valid government and e-commerce
 # registrations outright. The checksum remains the real guard against typos.
-# Characters 3-12 hold the holder's PAN (AAAAA9999A). A deductor with no PAN
-# registers against its TAN (AAAA99999A) instead, per the portal's own
-# registration guide, so that shape is accepted too - though every deductor
-# registration seen so far has in fact been PAN-based, so the TAN layout is
-# accepted on the strength of the documentation rather than an observation.
+# Characters 3-12 hold the holder's PAN (AAAAA9999A). The portal's own
+# registration guide says a deductor without a PAN may register against its TAN
+# (AAAA99999A) instead - "TDS applicants who do not have a PAN can select TAN
+# and enter their TAN" - so that shape is accepted as well. Every deductor
+# registration seen on the live portal so far is PAN-based (Indian Railways,
+# NTPC, Indian Oil all use theirs), so the TAN layout rests on the
+# documentation rather than on an observed number.
 _PAN_SHAPE: Final = re.compile(r"^[A-Z]{5}[0-9]{4}[A-Z]$")
 _GSTIN_PATTERN: Final = re.compile(
     r"^[0-9]{2}(?:[A-Z]{5}[0-9]{4}[A-Z]|[A-Z]{4}[0-9]{5}[A-Z])[1-9A-Z][A-Z][0-9A-Z]$"
