@@ -26,8 +26,8 @@ body:
     id: version
     attributes:
       label: Version
-      description: Output of `uv run gst-validator --help | head -1` or the installed version.
-      placeholder: "0.1.0"
+      description: Output of `gst-validator --version`.
+      placeholder: "0.2.0"
     validations:
       required: true
   - type: input
