@@ -318,7 +318,7 @@ everything this package raises; `httpx` errors are wrapped, never leaked.
 ---
 
 
-# What you get back
+## What you get back
 
 ### `TaxpayerProfile`
 

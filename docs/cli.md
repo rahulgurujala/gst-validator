@@ -16,7 +16,7 @@ usage: gst-validator [-h] [--version] [--offline]
                      [gstin ...]
 ```
 
-### Validate without touching the network
+## Validate without touching the network
 
 ```bash
 $ gst-validator 27AAACR5055K1Z7 --offline
@@ -52,7 +52,7 @@ $ gst-validator 27AAACR5055K1Z7 --offline --json
 Use this in CI, in a pre-commit check, or to screen input before spending a
 captcha. Exit code `2` means the GSTIN is malformed.
 
-### Full lookup (interactive)
+## Full lookup (interactive)
 
 ```bash
 $ gst-validator 27AAACR5055K1Z7
@@ -69,7 +69,7 @@ financial_years        2017-2018, 2018-2019, ...
 
 Open the image, type the text. The file is deleted once you have entered it.
 
-### Machine-readable output
+## Machine-readable output
 
 ```bash
 gst-validator 27AAACR5055K1Z7 --json     # modelled fields, dates as ISO strings
@@ -88,7 +88,7 @@ to stderr, which makes piping safe:
 gst-validator 27AAACR5055K1Z7 --json | jq -r '.legal_name, .principal_address'
 ```
 
-### Solving the captcha somewhere else
+## Solving the captcha somewhere else
 
 ```bash
 $ gst-validator 27AAACR5055K1Z7 --captcha-base64
@@ -107,7 +107,7 @@ gst-validator 27AAACR5055K1Z7 --json --captcha-base64 > taxpayer.json
 # the URI and the prompt appear on your terminal; only JSON reaches the file
 ```
 
-### Validating many at once
+## Validating many at once
 
 Offline validation needs no captcha, so a whole spreadsheet column costs
 nothing:
@@ -144,7 +144,7 @@ Two details that matter with real spreadsheets:
 A row that fails never stops the run: it comes back with `valid: false` and an
 `error`, and the exit code is `2` if any row was bad.
 
-### Output formats
+## Output formats
 
 | `--format` | What it is | Good for |
 |---|---|---|
@@ -166,7 +166,7 @@ gst-validator 27AAACR5055K1Z7 --offline --format csv -o checked.csv
 One GSTIN prints the detailed vertical view; several print a line each, which
 is what you want when scanning a column.
 
-### Looking up several in one session
+## Looking up several in one session
 
 A full lookup needs a captcha each, but the session is shared, so a batch
 opens one connection and prompts you per GSTIN with a counter:
@@ -177,7 +177,7 @@ gst-validator 27AAACR5055K1Z7 29AAACI4798L1ZU --format json -o both.json
 
 A lookup that fails is reported and the run carries on with the next one.
 
-### Other flags
+## Other flags
 
 ```bash
 gst-validator 27AAACR5055K1Z7 --details-only   # skip the captcha-free extras
@@ -191,24 +191,6 @@ gst-validator --version                                # print the version
 ```
 
 Also runnable as a module: `python -m gst_validator 27AAACR5055K1Z7`.
-
-### Exit codes
-
-| Code | Meaning |
-|---|---|
-| `0` | success |
-| `1` | lookup failed (wrong captcha, portal error, network) |
-| `2` | GSTIN failed format or checksum validation |
-| `130` | aborted (Ctrl-C / EOF) |
-
-```bash
-if gst-validator "$GSTIN" --offline >/dev/null 2>&1; then
-  echo "well-formed"
-fi
-```
-
----
-
 
 ## Every flag
 
@@ -255,3 +237,9 @@ text with no colour and no wrapping, so they stay byte-exact through a pipe.
 
 In a batch the worst code wins, so one bad row in a thousand still gives `2`
 while every good row is reported normally.
+
+```bash
+if gst-validator "$GSTIN" --offline >/dev/null 2>&1; then
+  echo "well-formed"
+fi
+```
