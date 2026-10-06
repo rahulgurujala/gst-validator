@@ -321,3 +321,62 @@ class TestAsDictShape:
         assert payload["is_active"] is False
         assert payload["is_cancelled"] is True
         assert payload["status"] == "Cancelled suo-moto"
+
+
+class TestMappedKeysStayInSync:
+    """`unmapped` is only honest while `_MAPPED_KEYS` matches what is read.
+
+    A key modelled in `from_payload` but left out of the set reappears in
+    `unmapped` forever, telling users the portal grew a field it did not; a
+    key listed but no longer read hides a real new field. The live fixtures
+    catch this only for keys they happen to contain, so it is checked against
+    the source instead.
+    """
+
+    @staticmethod
+    def _keys_read() -> set[str]:
+        import ast
+        from pathlib import Path as _Path
+
+        import gst_validator.taxpayer as module
+
+        tree = ast.parse(_Path(module.__file__ or "").read_text())
+        cls = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "TaxpayerDetails"
+        )
+        fn = next(
+            node
+            for node in cls.body
+            if isinstance(node, ast.FunctionDef) and node.name == "from_payload"
+        )
+        return {
+            node.args[0].value
+            for node in ast.walk(fn)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "get"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "payload"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        }
+
+    def test_no_modelled_key_leaks_into_unmapped(self) -> None:
+        from gst_validator.taxpayer import _MAPPED_KEYS  # pyright: ignore[reportPrivateUsage]
+
+        assert self._keys_read() - _MAPPED_KEYS == set()
+
+    def test_no_listed_key_has_stopped_being_read(self) -> None:
+        from gst_validator.taxpayer import _MAPPED_KEYS  # pyright: ignore[reportPrivateUsage]
+
+        assert _MAPPED_KEYS - self._keys_read() == set()
+
+
+class TestEchoedJunkGstin:
+    def test_a_null_gstin_does_not_become_the_string_none(self) -> None:
+        details = TaxpayerDetails.from_payload({"gstin": None, "lgnm": "X"})
+        assert details.gstin == ""
+        assert details.number is None

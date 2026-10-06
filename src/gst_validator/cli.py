@@ -15,14 +15,14 @@ from collections.abc import Generator, Iterable, Iterator, Sequence
 from contextlib import contextmanager, redirect_stdout
 from importlib.metadata import version
 from pathlib import Path
-from typing import Any, Final, cast
+from typing import Any, cast
 
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme
 
-from .bulk import ValidationResult, enrich_many, validate_many
+from .bulk import RESULT_KEYS, ValidationResult, enrich_many, validate_many
 from .cache import DiskCache, NullCache, TaxpayerCache
 from .client import GSTClient
 from .exceptions import GSTValidatorError
@@ -105,7 +105,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--offline",
         action="store_true",
-        help="only validate the GSTIN format and checksum, no network call",
+        help="only validate the GSTIN format and checksum, no captcha lookup",
     )
     parser.add_argument(
         "-f",
@@ -137,7 +137,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--enrich",
         action="store_true",
-        help="add the captcha-free portal data to each row (HSN/SAC, years, filing)",
+        help="add the captcha-free portal data to each row (HSN/SAC, years, "
+        "filing); needs the network, even with --offline",
     )
     parser.add_argument(
         "--details-only",
@@ -211,11 +212,6 @@ def _destination(path: Path | None) -> Generator[None]:
         finally:
             out = previous
     err.print(Text.assemble(("written to ", "label"), (str(path), "accent")))
-
-
-# The keys ValidationResult.as_dict() always produces; an input column sharing
-# one of these names is carried through as "source_<name>".
-_RESULT_KEYS: Final = frozenset(ValidationResult(value="x").as_dict())
 
 
 def _chosen_format(args: argparse.Namespace) -> str:
@@ -513,7 +509,7 @@ def _read_csv(column: str) -> tuple[list[str], list[dict[str, str]]]:
         # overwritten silently, so it is carried beside it instead.
         extras.append(
             {
-                (f"source_{key}" if key in _RESULT_KEYS else key): item
+                (f"source_{key}" if key in RESULT_KEYS else key): item
                 for key, item in record.items()
                 if key != column and item is not None
             }
@@ -577,15 +573,21 @@ def _run_bulk(args: argparse.Namespace, fmt: str) -> int:
 
 
 def _bulk_exit_code(rows: Sequence[ValidationResult], fmt: str) -> int:
-    """2 if anything failed to parse, with a count on stderr for a batch."""
+    """2 if anything failed to parse, 1 if every enrichment failed, else 0."""
     invalid = [row for row in rows if not row.is_valid]
-    if not invalid:
-        return 0
-    # The table renderer has already named each bad row, so a single input
-    # needs nothing further; a batch still deserves the tally.
-    if fmt != "table" or len(rows) > 1:
-        err.print(Text(f"{len(invalid)} of {len(rows)} inputs were invalid", style="err"))
-    return 2
+    if invalid:
+        # The table renderer has already named each bad row, so a single input
+        # needs nothing further; a batch still deserves the tally.
+        if fmt != "table" or len(rows) > 1:
+            err.print(Text(f"{len(invalid)} of {len(rows)} inputs were invalid", style="err"))
+        return 2
+    # Enrichment records a failure per row instead of raising, so a run where
+    # every lookup failed would otherwise report success. One failure among
+    # several is not fatal by design, but none succeeding is a failed run.
+    if rows and all(row.enrichment_error for row in rows):
+        err.print(Text(f"every lookup failed for all {len(rows)} inputs", style="err"))
+        return 1
+    return 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:

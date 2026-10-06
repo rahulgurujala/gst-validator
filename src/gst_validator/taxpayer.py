@@ -195,7 +195,7 @@ class TaxpayerDetails:
         additional = as_sequence(payload.get("adadr"))
         principal = as_mapping(payload.get("pradr"))
         return cls(
-            gstin=str(payload.get("gstin", "")),
+            gstin=as_text(payload.get("gstin")) or "",
             legal_name=as_text(payload.get("lgnm")),
             trade_name=as_text(payload.get("tradeNam")),
             status=as_text(payload.get("sts")),

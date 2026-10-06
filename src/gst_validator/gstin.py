@@ -36,7 +36,6 @@ _GSTIN_PATTERN: Final = re.compile(
 # The mod-36 check digit is computed the same way for both.
 _SPECIAL_PATTERN: Final = re.compile(r"^[0-9]{4}[A-Z]{3}[0-9]{5}[A-Z]{2}[0-9A-Z]$")
 _CHECKSUM_ALPHABET: Final = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-_DATE_FORMATS: Final = ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d")
 
 # First two GSTIN digits. Checked against the official master codes published
 # on the NIC e-invoice portal, https://einvoice1.gst.gov.in/Others/MasterCodes

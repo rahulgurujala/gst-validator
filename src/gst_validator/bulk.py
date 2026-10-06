@@ -8,14 +8,14 @@ this, because each one costs a person solving an image.
 
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import Any, Final
 
 from .client import GSTClient
 from .exceptions import GSTValidatorError, InvalidGSTINError
 from .gstin import GSTIN
 from .taxpayer import FilingPreference, FinancialYear, GoodsOrService
 
-__all__ = ["ValidationResult", "enrich_many", "validate_many"]
+__all__ = ["RESULT_KEYS", "ValidationResult", "enrich_many", "validate_many"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +72,26 @@ class ValidationResult:
         if self.enrichment_error:
             row["enrichment_error"] = self.enrichment_error
         return row
+
+
+def _result_keys() -> frozenset[str]:
+    """Every key :meth:`ValidationResult.as_dict` is able to emit.
+
+    Derived from a populated instance rather than written out by hand, so a
+    field added to the class above cannot be forgotten here. The command line
+    uses this to spot an input column whose name collides with one of ours; a
+    name missing from the set is a column of theirs silently overwritten.
+    """
+    probe = ValidationResult(
+        value="",
+        financial_years=(FinancialYear(value="", label=""),),
+        enrichment_error="?",
+    )
+    return frozenset(probe.as_dict())
+
+
+RESULT_KEYS: Final = _result_keys()
+"""Names :meth:`ValidationResult.as_dict` may use, for collision checks."""
 
 
 def validate_many(

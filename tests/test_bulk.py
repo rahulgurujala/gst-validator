@@ -8,6 +8,7 @@ import httpx
 import pytest
 
 from gst_validator import GSTClient, TTLCache, enrich_many, validate_many
+from gst_validator.bulk import RESULT_KEYS, ValidationResult
 from gst_validator.cli import main
 
 from .support import GOODS_PAYLOAD, PUBLIC_GSTIN, VALID_GSTIN
@@ -34,6 +35,18 @@ class TestValidateMany:
     def test_as_dict_keys_are_stable_between_valid_and_invalid(self) -> None:
         good, bad = validate_many([VALID_GSTIN, "nope"])
         assert set(good.as_dict()) == set(bad.as_dict())
+
+    def test_result_keys_covers_the_enriched_shape_too(self) -> None:
+        """The collision guard is useless if it misses the enrichment keys."""
+        from gst_validator.taxpayer import FinancialYear
+
+        enriched = ValidationResult(
+            value=VALID_GSTIN,
+            financial_years=(FinancialYear(value="2023-24", label="2023-24"),),
+            enrichment_error="boom",
+        )
+        assert set(enriched.as_dict()) <= RESULT_KEYS
+        assert {"codes", "financial_years", "filing_preferences"} <= RESULT_KEYS
 
 
 class TestEnrichMany:
@@ -188,6 +201,18 @@ class TestCsvRealWorldQuirks:
         assert row["state_name"] == "Maharashtra"
         assert row["source_state_name"] == "Narnia"
 
+    def test_a_clashing_enrichment_column_is_kept_too(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ "financial_years" is only emitted once enriched, so it was missed."""
+        monkeypatch.setattr(
+            "sys.stdin",
+            io.StringIO(f"gstin,financial_years\n{VALID_GSTIN},their own value\n"),
+        )
+        assert main(["-", "--offline", "--column", "gstin", "--format", "jsonl"]) == 0
+        row = json.loads(capsys.readouterr().out)
+        assert row["source_financial_years"] == "their own value"
+
     def test_quoted_commas_and_newlines_survive_the_round_trip(
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -245,3 +270,31 @@ class TestBrokenPipe:
         _, stderr = producer.communicate()
         assert b"BrokenPipeError" not in stderr
         assert b"Traceback" not in stderr
+
+
+class TestEnrichExitCode:
+    """A run whose every lookup failed must not report success."""
+
+    @staticmethod
+    def _dead() -> httpx.MockTransport:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/services/searchtp":
+                return httpx.Response(200, text="<html></html>")
+            return httpx.Response(503)
+
+        return httpx.MockTransport(handler)
+
+    def test_every_lookup_failing_exits_one(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        transport = self._dead()
+
+        def factory(**_: object) -> GSTClient:
+            return GSTClient(transport=transport, cache=TTLCache())
+
+        monkeypatch.setattr("gst_validator.cli.GSTClient", factory)
+        assert main([VALID_GSTIN, "--enrich", "--format", "jsonl"]) == 1
+        assert "every lookup failed" in capsys.readouterr().err
+
+    def test_a_clean_offline_run_is_unaffected(self) -> None:
+        assert main([VALID_GSTIN, "--offline", "--format", "jsonl"]) == 0
