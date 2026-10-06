@@ -310,7 +310,9 @@ def _rejection(payload: dict[str, Any]) -> TaxpayerLookupError:
     )
     message = str(raw_message) if raw_message is not None else None
     if message is None:
-        message = _ERROR_HINTS.get(code or "", "portal returned no taxpayer details")
+        # Neutral on purpose: this wraps every endpoint, not just the taxpayer
+        # lookup, and "no taxpayer details" is wrong for an ARN or a code search.
+        message = _ERROR_HINTS.get(code or "", "the portal rejected the request")
     return TaxpayerLookupError(message, code=code)
 
 

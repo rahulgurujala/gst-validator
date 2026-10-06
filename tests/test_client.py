@@ -69,7 +69,7 @@ class TestGSTClient:
     def test_unknown_error_code_still_raises(self) -> None:
         rejected = httpx.Response(200, json={"errorCode": "SWEB_1234"})
         with GSTClient(transport=transport(rejected)) as client:
-            with pytest.raises(TaxpayerLookupError, match="no taxpayer details"):
+            with pytest.raises(TaxpayerLookupError, match="rejected the request"):
                 client.fetch_details(VALID_GSTIN, "702603")
 
     def test_http_error_wrapped(self) -> None:

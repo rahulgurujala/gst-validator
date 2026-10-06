@@ -150,7 +150,17 @@ person's name rather than a company's.
 
 **Track an application** - `GET /trackarn?arn=&captcha=`. One captcha. An
 ARN, Application Reference Number, is the receipt the department issues for
-any application: a registration, an amendment, a refund, a cancellation.
+any application: a registration, an amendment, a refund, a cancellation. It
+is 15 characters: two fixed letters, the state code, MMYY, a serial and a
+check character.
+
+**The success shape here has not been observed.** A real ARN whose
+registration had already completed answered `SWEB_10001` with the captcha
+accepted, which suggests this pre-login tracker only follows applications
+still in progress. The failure path is handled - it raises
+`TaxpayerLookupError` carrying the code - but the fields on
+`ApplicationStatus` are inferred from the portal's own screens rather than
+from a captured response, so treat them as provisional.
 
 **Verify a document reference** - `POST /publicservices/api/verifyRfn` with
 `{refId, captcha}`. One captcha. An RFN, Reference Number of the document, is
@@ -255,6 +265,7 @@ passes through unchanged rather than being guessed at.
 | `FO8001` | an unrecognised `searchType`, such as `E` instead of `B` |
 | `EM_SRS_FO_016_02` | "Please enter the mandatory fields": a pincode with no state |
 | `RT-NPRFA-1008` | nested under `error`, seen from the financial-year endpoint |
+| `SWEB_10001` | seen from `trackarn` with a solved captcha and a real ARN; **meaning unconfirmed** |
 
 Anything else is surfaced as-is on `TaxpayerLookupError.code`. Note that the
 first three arrive with HTTP 200, like every other portal rejection.
