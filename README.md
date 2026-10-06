@@ -17,7 +17,7 @@
 [![Downloads](https://img.shields.io/pypi/dm/gst-validator?color=777)](https://pypi.org/project/gst-validator/)
 [![Visitors](https://hits.sh/github.com/rahulgurujala/gst-validator.svg?style=flat&label=visitors&color=777)](https://hits.sh/github.com/rahulgurujala/gst-validator/)
 
-[Install](#install) · [CLI](#cli) · [Library](#using-it-in-your-app) · [Data](#what-you-get-back) · [Contributing](#contributing)
+[Install](#install) · [CLI](docs/cli.md) · [Library](docs/library.md) · [Data](docs/library.md#what-you-get-back) · [Contributing](#contributing)
 
 </div>
 

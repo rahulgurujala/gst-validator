@@ -1,6 +1,7 @@
 """Guards on the release machinery."""
 
 import json
+import re
 import subprocess
 import sys
 from importlib import metadata
@@ -72,3 +73,45 @@ class TestProseStyle:
                 if any(dash in line for dash in dashes):
                     offenders.append(f"{name}:{number}")
         assert offenders == [], f"use plain ASCII punctuation: {offenders}"
+
+
+class TestDocumentationLinks:
+    """Relative links rot silently: nothing renders a 404 until a reader clicks.
+
+    Three of the five navigation links at the top of the README pointed at
+    sections that had moved into docs/ when it was cut down to a landing page.
+    """
+
+    @staticmethod
+    def _anchors(text: str) -> set[str]:
+        """GitHub's heading slug: lowercased, punctuation dropped, spaces to -."""
+        found: set[str] = set()
+        for line in text.splitlines():
+            heading = re.match(r"^#{1,6}\s+(.*)", line)
+            if heading:
+                slug = re.sub(r"[^\w\s-]", "", heading.group(1).lower()).strip()
+                found.add(slug.replace(" ", "-"))
+        return found
+
+    def test_every_relative_link_and_anchor_resolves(self) -> None:
+        broken: list[str] = []
+        for path in sorted(ROOT.glob("*.md")) + sorted((ROOT / "docs").glob("*.md")):
+            text = path.read_text(encoding="utf-8")
+            own = self._anchors(text)
+            for target in re.findall(r"\[[^\]]+\]\(([^)]+)\)", text):
+                if target.startswith(("http://", "https://", "mailto:")):
+                    continue
+                file_part, _, fragment = target.partition("#")
+                name = path.relative_to(ROOT)
+                if not file_part:
+                    if fragment and fragment not in own:
+                        broken.append(f"{name} -> #{fragment}")
+                    continue
+                destination = (path.parent / file_part).resolve()
+                if not destination.exists():
+                    broken.append(f"{name} -> {target} (no such file)")
+                elif fragment and fragment not in self._anchors(
+                    destination.read_text(encoding="utf-8")
+                ):
+                    broken.append(f"{name} -> {target} (no such anchor)")
+        assert broken == [], f"broken documentation links: {broken}"
