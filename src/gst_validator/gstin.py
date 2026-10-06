@@ -38,7 +38,8 @@ _SPECIAL_PATTERN: Final = re.compile(r"^[0-9]{4}[A-Z]{3}[0-9]{5}[A-Z]{2}[0-9A-Z]
 _CHECKSUM_ALPHABET: Final = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 _DATE_FORMATS: Final = ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d")
 
-# https://en.wikipedia.org/wiki/List_of_GST_state_codes - first two GSTIN digits.
+# First two GSTIN digits. Checked against the official master codes published
+# on the NIC e-invoice portal, https://einvoice1.gst.gov.in/Others/MasterCodes
 _STATE_NAMES: Final[dict[str, str]] = {
     "01": "Jammu and Kashmir",
     "02": "Himachal Pradesh",
@@ -67,7 +68,9 @@ _STATE_NAMES: Final[dict[str, str]] = {
     "25": "Daman and Diu",
     "26": "Dadra and Nagar Haveli and Daman and Diu",
     "27": "Maharashtra",
-    "28": "Andhra Pradesh (old)",
+    # 28 was Andhra Pradesh before the Telangana split and is no longer
+    # issued, but registrations from that period still carry it.
+    "28": "Andhra Pradesh (retired)",
     "29": "Karnataka",
     "30": "Goa",
     "31": "Lakshadweep",
@@ -78,21 +81,11 @@ _STATE_NAMES: Final[dict[str, str]] = {
     "36": "Telangana",
     "37": "Andhra Pradesh",
     "38": "Ladakh",
+    "96": "Other Countries",
     "97": "Other Territory",
-    "99": "Centre Jurisdiction",
+    # Also the prefix of the non-resident layout, hence GSTINLayout.NON_RESIDENT.
+    "99": "Other Countries",
 }
-# ``ntcrbs`` is the taxpayer's Core Business Activity, a field the portal
-# added in March 2021 with exactly three choices: Manufacturer, Trader, and
-# Service Provider and Others (wholesaler and retailer are sub-types of
-# Trader, not categories of their own). Both codes below were read off live
-# responses: "MFT" is the manufacturer code, not the "MFR" the name suggests,
-# which is why the trader code is left out until one is actually observed.
-# An unrecognised code passes through unchanged rather than being guessed at.
-_CORE_BUSINESS: Final[dict[str, str]] = {
-    "SPO": "Service Provider and Others",
-    "MFT": "Manufacturer",
-}
-
 # 14th GSTIN character: the kind of registration.
 _REGISTRATION_TYPES: Final[dict[str, str]] = {
     "Z": "Regular",

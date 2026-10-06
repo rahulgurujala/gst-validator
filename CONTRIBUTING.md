@@ -43,7 +43,9 @@ that version too.
 
 - **Tests never hit the network.** Every HTTP call goes through
   `httpx.MockTransport`. If you add an endpoint, add a fixture under
-  `tests/fixtures/` with the real payload shape.
+  `tests/fixtures/` with the real payload shape. Tests are split by subject
+  (`test_gstin.py`, `test_taxpayer.py`, `test_client.py`, `test_cache.py`,
+  `test_cli.py`); shared payloads and helpers live in `tests/support.py`.
 - **Never commit a real taxpayer's data.** Fixtures use either a public
   company's registration or a fictional, checksum-valid GSTIN. Do not add
   someone's name, address or GSTIN to this repo.

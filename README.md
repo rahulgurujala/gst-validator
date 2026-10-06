@@ -579,7 +579,7 @@ supported route; this package drives the public, captcha-gated search.
 
 ```bash
 uv sync              # install, including dev dependencies
-uv run pytest        # 124 tests, fully offline via httpx.MockTransport
+uv run pytest        # 129 tests, fully offline via httpx.MockTransport
 uv run mypy          # strict
 uv run pyright       # strict
 uv run ruff check .
