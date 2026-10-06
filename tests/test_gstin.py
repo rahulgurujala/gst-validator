@@ -323,3 +323,48 @@ class TestStateCodes:
             ("2317UNO00001UND", "Madhya Pradesh"),
         ):
             assert GSTIN.parse(value).state_name == expected, value
+
+
+class TestParsingRobustness:
+    """Properties that must hold for any input, not just the ones we thought of."""
+
+    def test_only_invalid_gstin_error_ever_escapes(self) -> None:
+        """Fuzzed input must never raise something a caller cannot catch."""
+        import random
+        import string
+
+        random.seed(7)
+        alphabet = string.printable + "अ١٢３​\x00﻿"
+        for _ in range(5000):
+            value = "".join(random.choice(alphabet) for _ in range(random.randint(0, 24)))
+            try:
+                GSTIN.parse(value)
+            except InvalidGSTINError:
+                pass
+
+    def test_the_checksum_catches_single_character_damage(self) -> None:
+        """Its whole purpose: a typo in any position must be refused.
+
+        Format and check digit together caught every one of these when this was
+        written, better than the roughly one-in-36 a check digit alone gives.
+        """
+        alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        slipped = 0
+        total = 0
+        for value in ("27AAACR5055K1Z7", "9917USA29016OS6", "2317UNO00001UND"):
+            for position in range(15):
+                for replacement in alphabet:
+                    if replacement == value[position]:
+                        continue
+                    total += 1
+                    slipped += GSTIN.is_valid(
+                        value[:position] + replacement + value[position + 1 :]
+                    )
+        assert total > 1000
+        assert slipped == 0
+
+    def test_parsing_is_idempotent(self) -> None:
+        for value in ("27aaacr5055k1z7", " 2317UNO00001UND ", "9917USA29016OS6"):
+            once = GSTIN.parse(value)
+            assert GSTIN.parse(once.value) == once
+            assert GSTIN.parse(str(once)) == once

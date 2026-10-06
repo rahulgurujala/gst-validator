@@ -173,7 +173,10 @@ class DiskCache:
         try:
             self.directory.mkdir(parents=True, exist_ok=True)
             # Write then rename, so a crash cannot leave half a file behind.
-            temporary = self._path(gstin).with_suffix(".tmp")
+            # The temporary name carries the process id, so two runs caching
+            # the same GSTIN at once cannot write to one another's file before
+            # the rename makes it visible.
+            temporary = self._path(gstin).with_suffix(f".{os.getpid()}.tmp")
             temporary.write_text(json.dumps(entry), encoding="utf-8")
             temporary.replace(self._path(gstin))
         except OSError:
