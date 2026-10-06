@@ -169,6 +169,9 @@ class DiskCache:
         return TaxpayerDetails.from_payload(cast(dict[str, Any], payload))
 
     def set(self, gstin: str, details: TaxpayerDetails) -> None:
+        # Outside the try on purpose: an unsafe key is a mistake in the calling
+        # code and must be heard, not swallowed with the write failures below.
+        path = self._path(gstin)
         entry = {"stored_at": time.time(), "payload": details.raw}
         try:
             self.directory.mkdir(parents=True, exist_ok=True)
@@ -176,17 +179,20 @@ class DiskCache:
             # The temporary name carries the process id, so two runs caching
             # the same GSTIN at once cannot write to one another's file before
             # the rename makes it visible.
-            temporary = self._path(gstin).with_suffix(f".{os.getpid()}.tmp")
+            temporary = path.with_suffix(f".{os.getpid()}.tmp")
             temporary.write_text(json.dumps(entry), encoding="utf-8")
-            temporary.replace(self._path(gstin))
-        except OSError:
-            # A cache that cannot be written is not a reason to fail a lookup.
+            temporary.replace(path)
+        except (OSError, TypeError, ValueError):
+            # A cache that cannot be written is not a reason to fail a lookup,
+            # whether the directory is unwritable or the payload will not
+            # serialise.
             return
 
     def clear(self) -> int:
         """Delete every cached entry and report how many were removed."""
         removed = 0
-        for path in self.directory.glob("*.json"):
+        # Also sweeps temporary files a run that died mid-write left behind.
+        for path in (*self.directory.glob("*.json"), *self.directory.glob("*.tmp")):
             try:
                 path.unlink()
                 removed += 1

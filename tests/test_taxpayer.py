@@ -268,3 +268,29 @@ class TestCompositionTaxpayer:
 class TestCaptcha:
     def test_data_uri(self) -> None:
         assert Captcha(b"ab").data_uri == "data:image/png;base64,YWI="
+
+
+class TestAbsentMarkersAreNotFalse:
+    """The portal's "absent" markers mean unknown, not off."""
+
+    def test_na_flag_is_unknown_rather_than_false(self) -> None:
+        details = TaxpayerDetails.from_payload(
+            {"gstin": VALID_GSTIN, "einvoiceStatus": "NA", "isFieldVisitConducted": "No"}
+        )
+        # "NA" must not be reported as "e-invoicing is switched off".
+        assert details.einvoice_enabled is None
+        assert details.is_field_visit_conducted is False
+
+    def test_an_empty_flag_is_also_unknown(self) -> None:
+        details = TaxpayerDetails.from_payload({"gstin": VALID_GSTIN, "einvoiceStatus": ""})
+        assert details.einvoice_enabled is None
+
+    def test_the_live_fixtures_still_read_the_same(self) -> None:
+        """Every captured payload must parse as it did before the change."""
+        for name, expected in (
+            ("taxpayer_live.json", False),
+            ("taxpayer_statutory_body.json", True),
+        ):
+            path = Path(__file__).parent / "fixtures" / name
+            details = TaxpayerDetails.from_payload(json.loads(path.read_text()))
+            assert details.einvoice_enabled is expected

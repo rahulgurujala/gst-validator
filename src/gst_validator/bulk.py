@@ -7,7 +7,7 @@ this, because each one costs a person solving an image.
 """
 
 from collections.abc import Iterable, Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from .client import GSTClient
@@ -114,22 +114,17 @@ def enrich_many(
             if result.gstin is None:
                 yield result
                 continue
+            # replace() rather than a fresh instance, so a field added to
+            # ValidationResult later cannot be dropped here by omission.
             try:
-                yield ValidationResult(
-                    value=result.value,
-                    gstin=result.gstin,
+                yield replace(
+                    result,
                     goods_and_services=session.fetch_goods_and_services(result.gstin),
                     financial_years=session.fetch_financial_years(result.gstin),
                     filing_preferences=session.fetch_filing_preferences(result.gstin),
-                    extra=result.extra,
                 )
             except GSTValidatorError as error:
-                yield ValidationResult(
-                    value=result.value,
-                    gstin=result.gstin,
-                    enrichment_error=str(error),
-                    extra=result.extra,
-                )
+                yield replace(result, enrichment_error=str(error))
     finally:
         if owned:
             session.close()

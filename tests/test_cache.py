@@ -174,3 +174,26 @@ class TestDiskCacheKeySafety:
         for key in ("9917USA29016OS6", "2317UNO00001UND", "27AAICA3918J1CT"):
             cache.set(key, details)
             assert cache.get(key) is not None
+
+
+class TestDiskCacheResilience:
+    """A cache is an optimisation: it must never be the thing that fails."""
+
+    def test_an_unserialisable_payload_does_not_break_the_lookup(self, tmp_path: Path) -> None:
+        cache = DiskCache(directory=tmp_path)
+        details = TaxpayerDetails.from_payload({"gstin": VALID_GSTIN, "odd": {1, 2}})
+        cache.set(VALID_GSTIN, details)  # must not raise
+        assert cache.get(VALID_GSTIN) is None
+
+    def test_an_unsafe_key_is_still_heard(self, tmp_path: Path) -> None:
+        """Widening the write guard must not swallow a caller's mistake."""
+        cache = DiskCache(directory=tmp_path)
+        with pytest.raises(ValueError, match="unsafe cache key"):
+            cache.set("../escape", TaxpayerDetails.from_payload({"gstin": VALID_GSTIN}))
+
+    def test_clear_sweeps_temporary_files_from_a_crashed_run(self, tmp_path: Path) -> None:
+        (tmp_path / f"{VALID_GSTIN}.4242.tmp").write_text("{}")
+        cache = DiskCache(directory=tmp_path)
+        cache.set(VALID_GSTIN, TaxpayerDetails.from_payload({"gstin": VALID_GSTIN}))
+        assert cache.clear() == 2
+        assert list(tmp_path.iterdir()) == []

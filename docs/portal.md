@@ -70,7 +70,7 @@ a PAN. `identifier_type` reports which shape is present.
 |---|---|
 | `"NA"`, `""` and `null` all mean absent | All normalise to `None` |
 | Dates as `dd/mm/yyyy` | Parsed into `datetime.date` |
-| Booleans as `"Yes"` / `"No"` | Parsed into `bool` |
+| Booleans as `"Yes"` / `"No"` | Parsed into `bool`; `"NA"` and `""` become `None`, not `False` |
 | `pradr` is sometimes one `adr` string, sometimes split fields | Both accepted; `Address.as_line()` returns whichever arrived |
 | Errors arrive as HTTP 200 with an `errorCode` | A body with no `gstin` raises `TaxpayerLookupError` |
 | Errors sometimes nest under `"error"` | Both shapes read |

@@ -199,6 +199,7 @@ class GSTIN:
 
     @property
     def state_code(self) -> str:
+        """The first two characters. "99" marks a non-resident rather than a state."""
         return self.value[:2]
 
     @property
@@ -215,13 +216,13 @@ class GSTIN:
     def identifier(self) -> str | None:
         """Characters 3-12: a PAN, or a TAN for a deductor registered without one.
 
-        ``None`` for a non-resident, whose GSTIN carries neither.
+        ``None`` for the non-resident and UIN layouts, which carry neither.
         """
         return None if self._is_special else self.value[2:12]
 
     @property
     def identifier_type(self) -> str | None:
-        """``"PAN"`` or ``"TAN"``, told apart by shape; ``None`` for a non-resident."""
+        """``"PAN"`` or ``"TAN"``, by shape; ``None`` for the two special layouts."""
         identifier = self.identifier
         if identifier is None:
             return None
@@ -245,7 +246,10 @@ class GSTIN:
 
     @property
     def registration_sequence(self) -> str | None:
-        """13th character: the Nth registration of this PAN in this state."""
+        """13th character: the Nth registration of this PAN in this state.
+
+        ``None`` for the non-resident and UIN layouts, which have no sequence.
+        """
         return None if self._is_special else self.value[12]
 
     @property
@@ -261,7 +265,7 @@ class GSTIN:
 
     @property
     def is_regular(self) -> bool:
-        """False for a non-resident, a TDS deductor or a TCS collector."""
+        """False for a UIN, a non-resident, a TDS deductor or a TCS collector."""
         return not self._is_special and self.value[13] == "Z"
 
     def __str__(self) -> str:

@@ -49,9 +49,14 @@ def as_sequence(value: object) -> list[Any]:
 
 
 def as_flag(value: object) -> bool | None:
-    """Portal booleans arrive as ``true``/``"Yes"``/``"Y"``/``"No"``."""
-    if value is None:
-        return None
+    """Portal booleans arrive as ``true``/``"Yes"``/``"Y"``/``"No"``.
+
+    The markers the portal uses for "absent" are read as unknown rather than
+    false, the same as :func:`as_text` does: answering ``False`` to ``"NA"``
+    would state that a thing is switched off when the portal did not say so.
+    """
     if isinstance(value, bool):
         return value
+    if as_text(value) is None:
+        return None
     return str(value).strip().casefold() in {"yes", "y", "true", "1"}
