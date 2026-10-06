@@ -75,13 +75,13 @@ _STATE_NAMES: Final[dict[str, str]] = {
 # ``ntcrbs`` is the taxpayer's Core Business Activity, a field the portal
 # added in March 2021 with exactly three choices: Manufacturer, Trader, and
 # Service Provider and Others (wholesaler and retailer are sub-types of
-# Trader, not categories of their own). "SPO" is the only code seen in a live
-# response; the other two are inferred from those names. An unrecognised code
-# passes through unchanged rather than being guessed at.
+# Trader, not categories of their own). Both codes below were read off live
+# responses: "MFT" is the manufacturer code, not the "MFR" the name suggests,
+# which is why the trader code is left out until one is actually observed.
+# An unrecognised code passes through unchanged rather than being guessed at.
 _CORE_BUSINESS: Final[dict[str, str]] = {
     "SPO": "Service Provider and Others",
-    "MFR": "Manufacturer",
-    "TRD": "Trader",
+    "MFT": "Manufacturer",
 }
 
 # 4th PAN character encodes the holder type.

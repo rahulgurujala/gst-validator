@@ -1,0 +1,31 @@
+{
+  "ntcrbs": "MFT",
+  "adhrVFlag": "No",
+  "lgnm": "I T C LIMITED",
+  "stj": "Commissionerate - West Bengal,Circle - CORPORATE DIVISION,Charge - LARGE TAXPAYER UNIT (Jurisdictional Office)",
+  "dty": "Regular",
+  "cxdt": "",
+  "gstin": "19AAACI5950L1Z7",
+  "nba": [
+    "Input Service Distributor (ISD)",
+    "Office / Sale Office",
+    "Warehouse / Depot",
+    "Factory / Manufacturing",
+    "Recipient of Goods or Services",
+    "Works Contract",
+    "Supplier of Services",
+    "Others"
+  ],
+  "ekycVFlag": "No",
+  "cmpRt": "NA",
+  "rgdt": "01/07/2017",
+  "ctb": "Public Limited Company",
+  "pradr": {
+    "adr": "37, ITC LIMITED, J L NEHRU ROAD, KOLKATA, Kolkata, West Bengal, 700071"
+  },
+  "sts": "Active",
+  "tradeNam": "ITC LIMITED",
+  "isFieldVisitConducted": "No",
+  "ctj": "State - CBIC,Zone - KOLKATA,Commissionerate - KOLKATA-SOUTH,Division - PARK STREET DIVISION,Range - RANGE-III",
+  "einvoiceStatus": "Yes"
+}
