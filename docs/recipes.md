@@ -148,6 +148,52 @@ Each PAN costs its own captcha, and the portal makes each captcha single-use,
 so this is a per-supplier operation rather than something to run over a whole
 spreadsheet.
 
+## Check whether a supplier is on the composition scheme
+
+A composition dealer pays a flat rate and **cannot charge you GST you can
+reclaim**. If one invoices you with tax on it, that is a problem worth
+catching early.
+
+```bash
+gst-validator --composition --state 27 --year 2025-2026 --format csv -o comp.csv
+```
+
+One captcha covers a whole state and year, so this is cheap per supplier. In
+Python, to screen a list of GSTINs against it:
+
+```python
+from gst_validator import GSTClient
+
+with GSTClient() as client:
+    solved = input(f"solve: {client.fetch_captcha().data_uri}\n> ")
+    scheme = {row.gstin for row in client.search_composition_taxpayers("27", "2025-2026", solved)}
+
+flagged = [gstin for gstin in my_suppliers if gstin in scheme]
+```
+
+A taxpayer's own lookup says the same thing in `taxpayer_type`, but that costs
+one captcha each; this costs one for the whole state.
+
+## Look a commodity code up
+
+Free, so there is nothing to ration:
+
+```bash
+gst-validator --hsn 3926
+gst-validator --hsn plastic --by description
+```
+
+```python
+from gst_validator import GSTClient
+
+with GSTClient() as client:
+    for code in client.search_hsn_codes("9983"):
+        print(code.code, "service" if code.is_service else "goods", code.description)
+```
+
+This pairs with `fetch_goods_and_services()`, which returns the codes a
+taxpayer is registered for but sometimes with a thin description.
+
 ## Serve it from a web app
 
 The captcha is bound to the session that fetched it, so keep one client per

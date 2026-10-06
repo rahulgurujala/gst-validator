@@ -13,6 +13,7 @@ import sys
 import tempfile
 from collections.abc import Generator, Iterable, Iterator, Sequence
 from contextlib import contextmanager, redirect_stdout
+from dataclasses import asdict, is_dataclass
 from importlib.metadata import version
 from pathlib import Path
 from typing import Any, cast
@@ -28,6 +29,9 @@ from .client import GSTClient
 from .exceptions import GSTValidatorError, InvalidPANError
 from .gstin import validate_pan
 from .models import GSTIN, Registration, TaxpayerProfile
+from .search import (
+    HSNCode,
+)
 
 __all__ = ["main"]
 
@@ -144,6 +148,56 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="list every GSTIN registered under this PAN (costs one captcha)",
     )
+    searches = parser.add_argument_group("other portal searches")
+    searches.add_argument(
+        "--hsn",
+        metavar="TEXT",
+        default=None,
+        help="look up HSN/SAC codes by code or description (no captcha)",
+    )
+    searches.add_argument(
+        "--by",
+        choices=("code", "description"),
+        default="code",
+        help="how --hsn matches (default: code)",
+    )
+    searches.add_argument(
+        "--practitioner",
+        action="store_true",
+        help="find GST practitioners; narrow with --state, --pincode or --enrolment",
+    )
+    searches.add_argument("--enrolment", metavar="NO", default=None, help="a practitioner's number")
+    searches.add_argument("--state", metavar="CODE", default=None, help="two-digit state code")
+    searches.add_argument("--pincode", metavar="PIN", default=None, help="six-digit pincode")
+    searches.add_argument(
+        "--composition",
+        action="store_true",
+        help="list composition-scheme taxpayers; needs --state and --year (one captcha)",
+    )
+    searches.add_argument(
+        "--year", metavar="FY", default=None, help="financial year, e.g. 2025-2026"
+    )
+    searches.add_argument(
+        "--opted-out",
+        action="store_true",
+        help="with --composition, list those who left the scheme instead",
+    )
+    searches.add_argument(
+        "--arn", metavar="ARN", default=None, help="track an application (one captcha)"
+    )
+    searches.add_argument(
+        "--rfn",
+        metavar="REF",
+        default=None,
+        help="verify a document reference number (one captcha)",
+    )
+    searches.add_argument(
+        "--temp-id",
+        metavar="ID",
+        default=None,
+        help="look up a temporary registration (one captcha)",
+    )
+
     parser.add_argument(
         "--enrich",
         action="store_true",
@@ -563,6 +617,158 @@ def _run_pan(args: argparse.Namespace, fmt: str) -> int:
     return 0
 
 
+def _rows_table(rows: Sequence[Any], columns: Sequence[tuple[str, str]]) -> Table:
+    """A plain one-line-per-row table, built from (heading, attribute) pairs."""
+    table = Table(show_header=True, header_style="label", box=None, pad_edge=False)
+    for heading, _ in columns:
+        table.add_column(heading, overflow="fold")
+    for row in rows:
+        table.add_row(*(Text(str(getattr(row, attr, "") or "")) for _, attr in columns))
+    return table
+
+
+def _emit_rows(
+    rows: Sequence[Any], fmt: str, columns: Sequence[tuple[str, str]], *, label: str
+) -> None:
+    """Render any list of dataclass rows in the requested format."""
+    payloads = [_as_payload(row) for row in rows]
+    match fmt:
+        case "csv":
+            _write_csv(payloads)
+        case "jsonl":
+            for payload in payloads:
+                print(json.dumps(payload, ensure_ascii=False, default=str))
+        case "json" | "raw":
+            if fmt == "raw":
+                err.print(Text(f"{label} keeps no raw body; printing JSON instead", style="warn"))
+            print(json.dumps(payloads, indent=2, ensure_ascii=False, default=str))
+        case _:
+            if rows:
+                out.print(_rows_table(rows, columns))
+
+
+def _as_payload(row: object) -> dict[str, Any]:
+    """Dataclass to a flat JSON-ready dict, dates as ISO strings."""
+    if not is_dataclass(row) or isinstance(row, type):
+        return {}
+    payload = asdict(row)
+    # `unmapped` is called `extra` in output, as TaxpayerDetails.as_dict does,
+    # and dropped when empty so it is not a blank column on every CSV row.
+    unmapped = payload.pop("unmapped", None)
+    flat: dict[str, Any] = {
+        key: (value.isoformat() if hasattr(value, "isoformat") else value)
+        for key, value in payload.items()
+    }
+    if unmapped:
+        flat["extra"] = unmapped
+    return flat
+
+
+def _run_hsn(args: argparse.Namespace, fmt: str) -> int:
+    """HSN/SAC code search. No captcha, so a batch costs nothing."""
+    terms = list(_read_gstins([args.hsn]))
+    if not terms:
+        err.print(Text("no search text given", style="err"))
+        return 2
+    found: list[HSNCode] = []
+    with GSTClient(cache=NullCache()) as client:
+        try:
+            for term in terms:
+                found.extend(client.search_hsn_codes(term, by=args.by))
+        except GSTValidatorError as error:
+            err.print(Text(str(error), style="err"))
+            return 1
+    if not found:
+        err.print(Text("no codes matched", style="warn"))
+    _emit_rows(found, fmt, (("code", "code"), ("description", "description")), label="HSN search")
+    return 0
+
+
+def _run_practitioner(args: argparse.Namespace, fmt: str) -> int:
+    """GST practitioner directory. No captcha."""
+    if not (args.state or args.pincode or args.enrolment):
+        err.print(Text("give --state, --pincode or --enrolment to search", style="err"))
+        return 2
+    with GSTClient(cache=NullCache()) as client:
+        try:
+            rows = client.search_practitioners(
+                state_code=args.state, pincode=args.pincode, enrolment_number=args.enrolment
+            )
+        except GSTValidatorError as error:
+            err.print(Text(str(error), style="err"))
+            return 1
+    if not rows:
+        err.print(Text("no practitioners matched", style="warn"))
+    _emit_rows(
+        rows,
+        fmt,
+        (("enrolment", "enrolment_number"), ("name", "name"), ("pincode", "pincode")),
+        label="the practitioner directory",
+    )
+    return 0
+
+
+def _run_composition(args: argparse.Namespace, fmt: str) -> int:
+    """Composition-scheme list for one state and year. One captcha."""
+    if not (args.state and args.year):
+        err.print(Text("--composition needs both --state and --year", style="err"))
+        return 2
+    with GSTClient(cache=NullCache()) as client:
+        try:
+            with _solved_captcha(client, args, f"composition-{args.state}") as solved:
+                rows = client.search_composition_taxpayers(
+                    args.state, args.year, solved, opted_in=not args.opted_out
+                )
+        except GSTValidatorError as error:
+            err.print(Text(str(error), style="err"))
+            return 1
+    if not rows:
+        err.print(Text("no taxpayers listed for that state and year", style="warn"))
+    _emit_rows(
+        rows,
+        fmt,
+        (("gstin", "gstin"), ("legal name", "legal_name"), ("type", "taxpayer_type")),
+        label="the composition list",
+    )
+    return 0
+
+
+def _run_single(args: argparse.Namespace, fmt: str) -> int:
+    """The three one-answer searches: ARN, RFN and temporary id. One captcha each."""
+    with GSTClient(cache=NullCache()) as client:
+        try:
+            with _solved_captcha(client, args, "lookup") as solved:
+                result: object
+                if args.arn:
+                    result = client.track_application(args.arn, solved)
+                elif args.rfn:
+                    result = client.verify_reference_number(args.rfn, solved)
+                else:
+                    result = client.search_temporary_registration(args.temp_id, solved)
+        except GSTValidatorError as error:
+            err.print(Text(str(error), style="err"))
+            return 1
+    payload = _as_payload(result)
+    if fmt in ("json", "jsonl", "raw", "csv"):
+        if fmt == "csv":
+            _write_csv([payload])
+        else:
+            print(
+                json.dumps(
+                    payload, indent=None if fmt == "jsonl" else 2, ensure_ascii=False, default=str
+                )
+            )
+    else:
+        table = Table(show_header=False, box=None, pad_edge=False, padding=(0, 2, 0, 0))
+        table.add_column("field", style="label", no_wrap=True)
+        table.add_column("value", overflow="fold")
+        for key, value in payload.items():
+            if value not in (None, "", {}, []):
+                table.add_row(key.replace("_", " "), Text(str(value)))
+        out.print(table)
+    return 0
+
+
 def _read_gstins(values: Sequence[str]) -> Iterator[str]:
     """Yield the GSTINs to process; "-" pulls one per line from stdin."""
     for value in values:
@@ -717,9 +923,17 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _dispatch(args: argparse.Namespace, fmt: str) -> int:
-    """PAN search is its own mode; offline work goes through the bulk path."""
+    """Each search is its own mode; offline work goes through the bulk path."""
     if args.pan:
         return _run_pan(args, fmt)
+    if args.hsn:
+        return _run_hsn(args, fmt)
+    if args.practitioner:
+        return _run_practitioner(args, fmt)
+    if args.composition:
+        return _run_composition(args, fmt)
+    if args.arn or args.rfn or args.temp_id:
+        return _run_single(args, fmt)
     if args.offline or args.column or args.enrich:
         return _run_bulk(args, fmt)
 

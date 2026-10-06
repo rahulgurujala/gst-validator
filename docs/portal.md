@@ -15,14 +15,19 @@ the portal is undocumented, so a claim without evidence is marked as such.
 | `fetch_filing_preferences()` | `/api/search/taxpayerProfileDetails` | no |
 | `fetch_profile()` | all of the above | one |
 | `fetch_registrations_by_pan()` | `/api/get/gstndtls` | **yes**, one per PAN |
+| `search_hsn_codes()` | `/commonservices/hsn/search/qsearch` | no |
+| `search_practitioners()` | `/api/search/gstp` | no |
+| `search_composition_taxpayers()` | `/api/search/tplist/opteddata` | **yes** |
+| `track_application()` | `/trackarn` | **yes** |
+| `verify_reference_number()` | `/publicservices/api/verifyRfn` | **yes** |
+| `search_temporary_registration()` | `/api/search/smreg` | **yes** |
 
 `goodservice` returns SAC codes for service providers (`bzsdtls`) and HSN
 codes for goods (`bzgddtls`); both are parsed into `GoodsOrService`, with
 `is_service` telling them apart.
 
-Two endpoints are captcha-gated, the taxpayer lookup and the PAN search; the
-other three answer freely. See [Access notes](#access-notes) for what the
-portal expects of a client.
+Six endpoints are captcha-gated and five answer freely. See
+[Access notes](#access-notes) for what the portal expects of a client.
 
 ## The GSTIN layouts
 
@@ -89,6 +94,65 @@ Established against the live portal:
   13th character) tells them apart.
 - The request needs `Referer: .../searchtpbypan`; the portal fingerprints
   clients per page.
+
+## The other public searches
+
+Each was found by watching the portal's own pages, then confirmed against a
+live response unless noted.
+
+**HSN/SAC codes** - `GET /commonservices/hsn/search/qsearch` with
+`inputText`, `selectedType` (`byCode` or `byDesc`) and `category=null`.
+Captcha-free and session-free. Answers `{"data":[{"c":code,"n":description}]}`
+for goods and services from one endpoint, with no field telling them apart:
+`HSNCode.is_service` derives it from the `99` prefix. An unknown code returns
+an empty list, not an error.
+
+**GST practitioners** - `POST /api/search/gstp` with
+`{searchType, trpNam, stCd, dstCd, pinCd}`. Captcha-free, and it answers with
+a bare JSON list rather than an envelope. **It returns personal data**: a
+named individual, a personal mobile number, an email address and a working
+address. One unfiltered state query returned 22 people. This package models
+the enrolment number, name, category, pincode and address, and deliberately
+drops the phone number and email.
+
+**Composition scheme** - `POST /api/search/tplist/opteddata` with
+`{op, stcd, fy, captcha}`, where `op` is `O` for opted in and `R` for opted
+out. One captcha per state and financial year.
+
+**Track an application** - `GET /trackarn?arn=&captcha=`. One captcha.
+
+**Verify a document reference** - `POST /publicservices/api/verifyRfn` with
+`{refId, captcha}`. One captcha. A reference the portal does not recognise is
+an answer, not a failure, so it is reported rather than raised.
+
+**Temporary registration** - `POST /api/search/smreg` with
+`{tempId, stateCd, mobNum, captcha}`. Needs either the temporary id or the
+registrant's own mobile number, which makes it a self-service lookup rather
+than a way to check a third party.
+
+**Advance ruling orders** are **not implemented**. The flow is a captcha gate
+at `POST /services/search/arcaptcha` (which answers `{"Status":"1"}` and was
+confirmed working with a solved captcha), followed by
+`GET /commonservices/ar/orders/search/` taking `terms`, `taxpayerId`,
+`legalName`, `orderNo`, `state`, `fromDate`, `toDate` and more. That second
+call returns HTTP 400 with an empty message for every parameter combination
+tried outside a browser, with the gateway reporting the path as
+`//ar/orders/search/`. Rather than ship a method that does not work, it is
+written down here for whoever picks it up.
+
+## Captcha-free master lists
+
+Several reference lists need no captcha, session or cookies:
+
+| Endpoint | What it is |
+|---|---|
+| `/master/allstates?includeCbic=true` | state codes, names, union-territory flags |
+| `/master/states` | the same, without CBIC |
+| `/master/fyear` | financial years the portal offers |
+| `/master/regapp` | application and form type codes |
+| `/master/st/{code}/district` | districts within a state |
+
+Only the first is used, by `scripts/check_state_master.py`.
 
 ## Blind endpoint discovery does not work
 

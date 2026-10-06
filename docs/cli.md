@@ -143,6 +143,56 @@ pan=$(gst-validator 27AAACR5055K1Z7 --offline --json | jq -r .pan)
 gst-validator --pan "$pan" --json
 ```
 
+## The portal's other searches
+
+### Commodity and service codes
+
+No captcha, no session, no limit - so a batch costs nothing:
+
+```bash
+gst-validator --hsn 3926                      # by code
+gst-validator --hsn plastic --by description  # by words
+gst-validator --hsn - --format csv < codes.txt > described.csv
+```
+
+`is_service` tells SAC codes from HSN codes, derived from the leading `99`
+rather than from any flag the portal sends.
+
+### Composition-scheme taxpayers
+
+A composition dealer cannot charge you GST you are able to reclaim, so this is
+worth knowing about a supplier. One captcha per state and year:
+
+```bash
+gst-validator --composition --state 27 --year 2025-2026
+gst-validator --composition --state 27 --year 2025-2026 --opted-out
+```
+
+### Track an application, verify a notice
+
+```bash
+gst-validator --arn AA270125000000X      # where an application has reached
+gst-validator --rfn RF2701250000001      # was this notice really issued?
+gst-validator --temp-id 271700000000TMP  # a temporary registration
+```
+
+Each costs one captcha. `--rfn` is the one to know about: fake GST notices are
+a real problem, and a reference the portal does not recognise comes back with
+`is_genuine: false` rather than an error, because that is the answer.
+
+### Find a GST practitioner
+
+```bash
+gst-validator --practitioner --enrolment 351800000001GP9
+gst-validator --practitioner --pincode 744103
+```
+
+No captcha. The results describe named individuals, so the search has to be
+narrowed: `--state`, `--pincode` or `--enrolment` is required. The portal also
+publishes a phone number and an email address for each practitioner; this
+package does not carry either, because engaging one is done through the
+portal.
+
 ## Validating many at once
 
 Offline validation needs no captcha, so a whole spreadsheet column costs
@@ -239,6 +289,12 @@ Also runnable as a module: `python -m gst_validator 27AAACR5055K1Z7`.
 | `-o`, `--output PATH` | Write the result to a file instead of stdout |
 | `--column NAME` | Read the input as CSV and take GSTINs from this column |
 | `--pan PAN` | List every GSTIN registered under this PAN; costs one captcha |
+| `--hsn TEXT` | Search HSN/SAC codes, with `--by code` or `--by description`; no captcha |
+| `--practitioner` | Find GST practitioners; narrow with `--enrolment`, `--pincode` or `--state` |
+| `--composition` | Composition-scheme list; needs `--state` and `--year`, one captcha |
+| `--arn ARN` | Track an application; one captcha |
+| `--rfn REF` | Verify a document reference number; one captcha |
+| `--temp-id ID` | Look up a temporary registration; one captcha |
 | `--enrich` | Add the captcha-free portal data to each row; needs the network, even alongside `--offline` |
 | `--details-only` | Skip the captcha-free extras on a full lookup |
 | `--refresh` | Ignore any cached result and look up afresh |

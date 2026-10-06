@@ -76,7 +76,8 @@ sees `datetime.date`, `None` and exceptions.
 | **Bulk by default** | A CSV column, a file of GSTINs or stdin; CSV, JSON, JSON Lines or table out |
 | **Typed objects** | Dates parsed, `"NA"` normalised, nothing silently dropped, `py.typed` shipped |
 | **Captcha, your way** | Raw bytes, base64 or a `data:` URI, so a browser, a person or a service can solve it |
-| **Three free endpoints** | HSN/SAC codes, financial years and filing preferences need no captcha at all |
+| **Eleven portal searches** | Taxpayer, PAN, HSN/SAC codes, composition scheme, applications, notices, practitioners and more |
+| **Five free endpoints** | HSN/SAC search, the practitioner directory, codes, years and filing preferences need no captcha |
 | **Sync and async** | The same API with `await`, both strict-typed |
 | **Caches properly** | A lookup costs a human-solved captcha, so results persist between CLI runs |
 
@@ -113,6 +114,13 @@ List every GSTIN a company holds, found by its PAN:
 
 ```bash
 gst-validator --pan AAACR5055K --json
+```
+
+Look up a commodity code, or check a notice is genuine:
+
+```bash
+gst-validator --hsn 3926                 # no captcha
+gst-validator --rfn RF2701250000001      # was this really issued?
 ```
 
 From Python:

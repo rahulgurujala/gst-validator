@@ -1,0 +1,12 @@
+[
+  {"enrlNo": "351800000001GP9", "trpNam": "A PRACTITIONER", "stCd": "35", "dstCd": null,
+   "pinCd": null, "cntctNo": "9000000000", "emailId": "someone@example.com", "ctgry": "CAHCP",
+   "adrs": {"bldNo": "1", "fltNo": null, "bldName": null, "road": "EXAMPLE ROAD",
+            "locality": "EXAMPLE TOWN", "district": "EXDIS", "pinCd": "744103",
+            "addr": "1,EXAMPLE ROAD,EXAMPLE TOWN"},
+   "searchType": null, "authTokn": null, "status": "A"},
+  {"enrlNo": "351800000002GP7", "trpNam": "ANOTHER PRACTITIONER", "stCd": "35", "dstCd": null,
+   "pinCd": null, "cntctNo": "9000000001", "emailId": "other@example.com", "ctgry": "GOPDC",
+   "adrs": {"addr": "2,SAMPLE LANE", "pinCd": "744105"},
+   "searchType": null, "authTokn": null, "status": "I"}
+]

@@ -149,7 +149,49 @@ validate_pan("27AAACR5055K1Z7")  # raises InvalidPANError - that is a GSTIN
 The captcha is single-use: a second PAN needs a second one. A PAN with no
 registrations comes back as an empty tuple, which is an answer, not an error.
 
-## 5. The full lookup (one captcha)
+## 5. The portal's other searches
+
+Six more searches sit beside the taxpayer lookup. Two need no captcha at all:
+
+```python
+from gst_validator import GSTClient
+
+with GSTClient() as client:
+    # commodity and service codes - free, so batch them freely
+    for code in client.search_hsn_codes("3926"):
+        print(code.code, code.is_service, code.description)
+    client.search_hsn_codes("plastic", by="description")
+
+    # a registered practitioner, by enrolment number
+    client.search_practitioners(enrolment_number="351800000001GP9")
+```
+
+The other four cost one captcha each:
+
+```python
+with GSTClient() as client:
+    solved = input(f"solve: {client.fetch_captcha().data_uri}\n> ")
+
+    # who is on the composition scheme in a state and year
+    client.search_composition_taxpayers("27", "2025-2026", solved)
+    client.search_composition_taxpayers("27", "2025-2026", solved, opted_in=False)
+
+    # where an application has reached
+    client.track_application("AA270125000000X", solved)
+
+    # whether a notice really came from the department
+    notice = client.verify_reference_number("RF2701250000001", solved)
+    if not notice.is_genuine:
+        ...  # an unrecognised reference is an answer, not an error
+
+    # a temporary registration
+    client.search_temporary_registration("271700000000TMP", solved)
+```
+
+Each has an `await` twin on `AsyncGSTClient`. The captcha is single-use, so
+each call above needs its own.
+
+## 6. The full lookup (one captcha)
 
 The captcha is bound to the client's cookies, so fetch and submit must happen
 on the **same instance**:
@@ -169,7 +211,7 @@ profile.as_dict()  # everything, JSON-ready
 `fetch_details()` instead of `fetch_profile()` if you only want the
 captcha-gated part.
 
-## 6. Web app: captcha to the browser, text back
+## 7. Web app: captcha to the browser, text back
 
 The pattern the original Flask app was reaching for: keep one client per
 pending lookup, keyed by a session id:
@@ -211,7 +253,7 @@ The front end renders `image` straight into `<img src="{{ image }}">`, since it 
 already a `data:` URI. Give `pending` an expiry; portal sessions do not live
 forever, and an abandoned entry leaks a connection pool.
 
-## 7. Checking many at once
+## 8. Checking many at once
 
 ```python
 from gst_validator import validate_many, enrich_many
@@ -235,7 +277,7 @@ dataframe.
 per-row `enrichment_error` instead of failing the batch. The captcha-gated
 lookup is deliberately not part of it, since each one costs a solved image.
 
-## 8. Async
+## 9. Async
 
 Same API, `await` and `async with`:
 
@@ -253,7 +295,7 @@ async def codes(gstin: str) -> tuple[str, ...]:
 asyncio.run(codes("27AAACR5055K1Z7"))
 ```
 
-## 9. Caching
+## 10. Caching
 
 Each live lookup costs a human-solved captcha, so successful results are
 cached in a process-wide `TTLCache` (24 h, 512 entries, LRU, thread-safe).
@@ -327,7 +369,7 @@ concurrent lookups. The *cache* is the shared piece; clients stay cheap and
 short-lived. The cache stores `.raw`, so a cached entry survives a model
 upgrade.
 
-## 10. Error handling
+## 11. Error handling
 
 ```
 GSTValidatorError
@@ -388,6 +430,26 @@ be weight without a job.
 
 `as_dict()` adds `state_name`, `registration_sequence` and
 `registration_type`, decoded from the number itself.
+
+### The other searches
+
+Each is a frozen dataclass with an `unmapped` dict and no `raw`, for the same
+reason as `Registration`: nothing caches them, and every key the portal sends
+has a field.
+
+| Type | From | Notable |
+|---|---|---|
+| `HSNCode` | `search_hsn_codes()` | `code`, `description`, `is_service`, `chapter` |
+| `CompositionTaxpayer` | `search_composition_taxpayers()` | `gstin`, `number`, `name`, `registration_date` |
+| `ApplicationStatus` | `track_application()` | `arn`, `status_description`, `form`, `submitted_on` |
+| `ReferenceNumber` | `verify_reference_number()` | `is_genuine`, `document_type`, `issued_on` |
+| `GSTPractitioner` | `search_practitioners()` | `enrolment_number`, `name`, `pincode`, `is_active` |
+| `TemporaryRegistration` | `search_temporary_registration()` | `temporary_id`, `legal_name`, `status` |
+
+`GSTPractitioner` describes a named private individual. The portal also
+returns a personal phone number and email address for each one; this package
+deliberately carries neither, and they are excluded from `unmapped` too so
+that it keeps meaning "the portal grew a field".
 
 ### `TaxpayerDetails`
 

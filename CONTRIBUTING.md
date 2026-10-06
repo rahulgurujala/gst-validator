@@ -22,6 +22,7 @@ create a virtualenv yourself. Python 3.13+ is required.
 src/gst_validator/
   gstin.py       the number itself: the three layouts, checksum, what each encodes
   taxpayer.py    what the portal returns: details, address, jurisdiction, profile
+  search.py      the portal's other searches: codes, lists, applications, notices
   captcha.py     the captcha image
   bulk.py        validating and enriching many at once
   client.py      the sync and async HTTP clients
@@ -36,9 +37,9 @@ scripts/
                          master; a maintainer tool, run before a release
 ```
 
-Tests mirror that: `test_gstin.py`, `test_taxpayer.py`, `test_client.py`,
-`test_cache.py`, `test_bulk.py`, `test_cli.py` and `test_packaging.py`, with
-shared payloads and helpers in `tests/support.py`.
+Tests mirror that: `test_gstin.py`, `test_taxpayer.py`, `test_search.py`,
+`test_client.py`, `test_cache.py`, `test_bulk.py`, `test_cli.py` and
+`test_packaging.py`, with shared payloads and helpers in `tests/support.py`.
 
 ## Before opening a pull request
 
@@ -77,7 +78,9 @@ that version too.
   [Where things live](#where-things-live).
 - **Never commit a real taxpayer's data.** Fixtures use either a public
   company's registration or a fictional, checksum-valid GSTIN. Do not add
-  someone's name, address or GSTIN to this repo.
+  someone's name, address or GSTIN to this repo. The practitioner directory
+  returns private individuals' contact details: the fixture for it is
+  invented, and must stay that way.
 - **Keep it typed.** Both type checkers run in strict mode. Public functions
   are annotated; `Any` only at the JSON boundary, narrowed immediately.
 - **Machine output stays plain.** The human table is rendered with rich, but

@@ -5,6 +5,7 @@ from typing import Any, ClassVar, Final, Self, cast
 
 import httpx
 
+from ._parsing import as_mapping
 from .cache import DEFAULT_CACHE, TaxpayerCache
 from .exceptions import CaptchaError, TaxpayerLookupError
 from .gstin import validate_pan
@@ -17,6 +18,14 @@ from .models import (
     Registration,
     TaxpayerDetails,
     TaxpayerProfile,
+)
+from .search import (
+    ApplicationStatus,
+    CompositionTaxpayer,
+    GSTPractitioner,
+    HSNCode,
+    ReferenceNumber,
+    TemporaryRegistration,
 )
 
 __all__ = ["AsyncGSTClient", "GSTClient"]
@@ -58,6 +67,13 @@ class _BaseGSTClient:
     PROFILE_PATH: ClassVar[str] = "/api/search/taxpayerProfileDetails"
     PAN_SEARCH_PATH: ClassVar[str] = "/searchtpbypan"
     REGISTRATIONS_PATH: ClassVar[str] = "/api/get/gstndtls"
+    COMPOSITION_PATH: ClassVar[str] = "/api/search/tplist/opteddata"
+    ARN_PATH: ClassVar[str] = "/trackarn"
+    PRACTITIONER_PATH: ClassVar[str] = "/api/search/gstp"
+    TEMPORARY_PATH: ClassVar[str] = "/api/search/smreg"
+    # These two sit outside /services, so they are requested absolutely.
+    HSN_URL: ClassVar[str] = "https://services.gst.gov.in/commonservices/hsn/search/qsearch"
+    RFN_URL: ClassVar[str] = "https://services.gst.gov.in/publicservices/api/verifyRfn"
 
     @classmethod
     def _base_headers(cls, user_agent: str) -> dict[str, str]:
@@ -142,6 +158,67 @@ class _BaseGSTClient:
             raise _rejection(payload)
         entries = _entries(payload.get("gstinResList"))
         return tuple(Registration.from_payload(entry) for entry in entries)
+
+    @staticmethod
+    def _as_hsn_codes(response: httpx.Response) -> tuple[HSNCode, ...]:
+        """``{"data": [{"c": ..., "n": ...}]}``; an unknown code is an empty list."""
+        payload = _json_object(response)
+        return tuple(HSNCode.from_payload(entry) for entry in _entries(payload.get("data")))
+
+    @staticmethod
+    def _as_composition(response: httpx.Response) -> tuple[CompositionTaxpayer, ...]:
+        """The opted-in/out list, which arrives under ``data`` behind an envelope."""
+        data = _envelope(response)
+        rows: object = data
+        if isinstance(data, dict):
+            mapping = cast(dict[str, Any], data)
+            rows = mapping.get("tpList") or mapping.get("list") or mapping.get("response")
+        return tuple(CompositionTaxpayer.from_payload(entry) for entry in _entries(rows))
+
+    @staticmethod
+    def _as_application(response: httpx.Response) -> ApplicationStatus:
+        """A tracked ARN. No ``arn`` in the body means the portal refused it."""
+        payload = _json_object(response)
+        body = as_mapping(payload.get("data")) or payload
+        if not body.get("arn"):
+            raise _rejection(payload)
+        return ApplicationStatus.from_payload(body)
+
+    @staticmethod
+    def _as_reference(response: httpx.Response, reference: str) -> ReferenceNumber:
+        """A verified RFN.
+
+        An unrecognised reference is an answer, not a failure: the whole point
+        is to learn that a notice did not come from the department. Only a
+        portal-level rejection, such as a bad captcha, raises.
+        """
+        payload = _json_object(response)
+        if payload.get("errorCode") and not payload.get("docType"):
+            raise _rejection(payload)
+        body = as_mapping(payload.get("data")) or payload
+        return ReferenceNumber.from_payload({"refId": reference, **body})
+
+    @staticmethod
+    def _as_practitioners(response: httpx.Response) -> tuple[GSTPractitioner, ...]:
+        """The directory answers with a bare list rather than an envelope."""
+        try:
+            body: object = response.json()
+        except ValueError as error:
+            raise TaxpayerLookupError("portal returned a non-JSON body") from error
+        if isinstance(body, dict):
+            mapping = cast(dict[str, Any], body)
+            if mapping.get("errorCode"):
+                raise _rejection(mapping)
+            body = mapping.get("data")
+        return tuple(GSTPractitioner.from_payload(entry) for entry in _entries(body))
+
+    @staticmethod
+    def _as_temporary(response: httpx.Response) -> TemporaryRegistration:
+        payload = _json_object(response)
+        body = as_mapping(payload.get("data")) or payload
+        if not body.get("tempId"):
+            raise _rejection(payload)
+        return TemporaryRegistration.from_payload(body)
 
     @staticmethod
     def _as_details(response: httpx.Response) -> TaxpayerDetails:
@@ -350,6 +427,145 @@ class GSTClient(_BaseGSTClient):
             ) from error
         return self._as_registrations(response)
 
+    def search_hsn_codes(self, text: str, *, by: str = "code") -> tuple[HSNCode, ...]:
+        """Look a commodity or service code up by code or description.
+
+        Needs no captcha and no session. ``by="code"`` matches leading digits,
+        ``by="description"`` matches words. An unknown code answers with an
+        empty tuple rather than an error.
+        """
+        selected = "byCode" if by == "code" else "byDesc"
+        try:
+            response = self._client.get(
+                self.HSN_URL,
+                params={"inputText": text, "selectedType": selected, "category": "null"},
+                headers=self._api_headers(),
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as error:
+            raise TaxpayerLookupError(f"request to {self.HSN_URL} failed: {error}") from error
+        return self._as_hsn_codes(response)
+
+    def search_practitioners(
+        self,
+        *,
+        state_code: str | None = None,
+        pincode: str | None = None,
+        name: str | None = None,
+        enrolment_number: str | None = None,
+    ) -> tuple[GSTPractitioner, ...]:
+        """Find registered GST practitioners. Needs no captcha.
+
+        **Returns personal data about named individuals.** Narrow the search:
+        a bare state code returns everyone enrolled in that state, which is a
+        directory dump rather than a lookup, and is not what the portal
+        publishes this for. See :class:`~gst_validator.search.GSTPractitioner`.
+        """
+        payload: dict[str, Any] = {
+            "searchType": "E" if enrolment_number else "A",
+            "trpNam": name,
+            "stCd": state_code,
+            "dstCd": None,
+            "pinCd": pincode or "",
+        }
+        if enrolment_number:
+            payload["enrlNo"] = enrolment_number
+        try:
+            response = self._client.post(
+                self.PRACTITIONER_PATH, json=payload, headers=self._api_headers()
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as error:
+            raise TaxpayerLookupError(
+                f"request to {self.PRACTITIONER_PATH} failed: {error}"
+            ) from error
+        return self._as_practitioners(response)
+
+    def search_composition_taxpayers(
+        self, state_code: str, financial_year: str, captcha: str, *, opted_in: bool = True
+    ) -> tuple[CompositionTaxpayer, ...]:
+        """Taxpayers who opted into or out of the composition scheme. One captcha."""
+        text = captcha.strip()
+        if not text:
+            raise TaxpayerLookupError("captcha text must not be empty")
+        payload = {
+            "op": "O" if opted_in else "R",
+            "captcha": text,
+            "stcd": state_code,
+            "fy": financial_year,
+        }
+        try:
+            response = self._client.post(
+                self.COMPOSITION_PATH, json=payload, headers=self._details_headers()
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as error:
+            raise TaxpayerLookupError(
+                f"request to {self.COMPOSITION_PATH} failed: {error}"
+            ) from error
+        return self._as_composition(response)
+
+    def track_application(self, arn: str, captcha: str) -> ApplicationStatus:
+        """Where an application has reached, by its ARN. One captcha."""
+        text = captcha.strip()
+        if not text:
+            raise TaxpayerLookupError("captcha text must not be empty")
+        try:
+            response = self._client.get(
+                self.ARN_PATH,
+                params={"arn": arn.strip().upper(), "captcha": text},
+                headers=self._api_headers(),
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as error:
+            raise TaxpayerLookupError(f"request to {self.ARN_PATH} failed: {error}") from error
+        return self._as_application(response)
+
+    def verify_reference_number(self, reference: str, captcha: str) -> ReferenceNumber:
+        """Check whether a document reference number was issued by the department.
+
+        One captcha. A reference the portal does not recognise comes back with
+        ``is_genuine`` false, which is the answer, not an error.
+        """
+        text = captcha.strip()
+        if not text:
+            raise TaxpayerLookupError("captcha text must not be empty")
+        cleaned = reference.strip().upper()
+        try:
+            response = self._client.post(
+                self.RFN_URL,
+                json={"refId": cleaned, "captcha": text},
+                headers=self._details_headers(),
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as error:
+            raise TaxpayerLookupError(f"request to {self.RFN_URL} failed: {error}") from error
+        return self._as_reference(response, cleaned)
+
+    def search_temporary_registration(
+        self, temporary_id: str, captcha: str, *, mobile: str | None = None
+    ) -> TemporaryRegistration:
+        """Look a temporary registration up by its id. One captcha."""
+        text = captcha.strip()
+        if not text:
+            raise TaxpayerLookupError("captcha text must not be empty")
+        payload = {
+            "tempId": temporary_id.strip().upper(),
+            "stateCd": None,
+            "mobNum": mobile,
+            "captcha": text,
+        }
+        try:
+            response = self._client.post(
+                self.TEMPORARY_PATH, json=payload, headers=self._details_headers()
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as error:
+            raise TaxpayerLookupError(
+                f"request to {self.TEMPORARY_PATH} failed: {error}"
+            ) from error
+        return self._as_temporary(response)
+
     def _get(self, path: str, gstin: GSTIN | str, **params: str) -> httpx.Response:
         """GET a captcha-free endpoint, opening a portal session if needed."""
         number = gstin if isinstance(gstin, GSTIN) else GSTIN.parse(gstin)
@@ -489,6 +705,145 @@ class AsyncGSTClient(_BaseGSTClient):
                 f"request to {self.REGISTRATIONS_PATH} failed: {error}"
             ) from error
         return self._as_registrations(response)
+
+    async def search_hsn_codes(self, text: str, *, by: str = "code") -> tuple[HSNCode, ...]:
+        """Look a commodity or service code up by code or description.
+
+        Needs no captcha and no session. ``by="code"`` matches leading digits,
+        ``by="description"`` matches words. An unknown code answers with an
+        empty tuple rather than an error.
+        """
+        selected = "byCode" if by == "code" else "byDesc"
+        try:
+            response = await self._client.get(
+                self.HSN_URL,
+                params={"inputText": text, "selectedType": selected, "category": "null"},
+                headers=self._api_headers(),
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as error:
+            raise TaxpayerLookupError(f"request to {self.HSN_URL} failed: {error}") from error
+        return self._as_hsn_codes(response)
+
+    async def search_practitioners(
+        self,
+        *,
+        state_code: str | None = None,
+        pincode: str | None = None,
+        name: str | None = None,
+        enrolment_number: str | None = None,
+    ) -> tuple[GSTPractitioner, ...]:
+        """Find registered GST practitioners. Needs no captcha.
+
+        **Returns personal data about named individuals.** Narrow the search:
+        a bare state code returns everyone enrolled in that state, which is a
+        directory dump rather than a lookup, and is not what the portal
+        publishes this for. See :class:`~gst_validator.search.GSTPractitioner`.
+        """
+        payload: dict[str, Any] = {
+            "searchType": "E" if enrolment_number else "A",
+            "trpNam": name,
+            "stCd": state_code,
+            "dstCd": None,
+            "pinCd": pincode or "",
+        }
+        if enrolment_number:
+            payload["enrlNo"] = enrolment_number
+        try:
+            response = await self._client.post(
+                self.PRACTITIONER_PATH, json=payload, headers=self._api_headers()
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as error:
+            raise TaxpayerLookupError(
+                f"request to {self.PRACTITIONER_PATH} failed: {error}"
+            ) from error
+        return self._as_practitioners(response)
+
+    async def search_composition_taxpayers(
+        self, state_code: str, financial_year: str, captcha: str, *, opted_in: bool = True
+    ) -> tuple[CompositionTaxpayer, ...]:
+        """Taxpayers who opted into or out of the composition scheme. One captcha."""
+        text = captcha.strip()
+        if not text:
+            raise TaxpayerLookupError("captcha text must not be empty")
+        payload = {
+            "op": "O" if opted_in else "R",
+            "captcha": text,
+            "stcd": state_code,
+            "fy": financial_year,
+        }
+        try:
+            response = await self._client.post(
+                self.COMPOSITION_PATH, json=payload, headers=self._details_headers()
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as error:
+            raise TaxpayerLookupError(
+                f"request to {self.COMPOSITION_PATH} failed: {error}"
+            ) from error
+        return self._as_composition(response)
+
+    async def track_application(self, arn: str, captcha: str) -> ApplicationStatus:
+        """Where an application has reached, by its ARN. One captcha."""
+        text = captcha.strip()
+        if not text:
+            raise TaxpayerLookupError("captcha text must not be empty")
+        try:
+            response = await self._client.get(
+                self.ARN_PATH,
+                params={"arn": arn.strip().upper(), "captcha": text},
+                headers=self._api_headers(),
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as error:
+            raise TaxpayerLookupError(f"request to {self.ARN_PATH} failed: {error}") from error
+        return self._as_application(response)
+
+    async def verify_reference_number(self, reference: str, captcha: str) -> ReferenceNumber:
+        """Check whether a document reference number was issued by the department.
+
+        One captcha. A reference the portal does not recognise comes back with
+        ``is_genuine`` false, which is the answer, not an error.
+        """
+        text = captcha.strip()
+        if not text:
+            raise TaxpayerLookupError("captcha text must not be empty")
+        cleaned = reference.strip().upper()
+        try:
+            response = await self._client.post(
+                self.RFN_URL,
+                json={"refId": cleaned, "captcha": text},
+                headers=self._details_headers(),
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as error:
+            raise TaxpayerLookupError(f"request to {self.RFN_URL} failed: {error}") from error
+        return self._as_reference(response, cleaned)
+
+    async def search_temporary_registration(
+        self, temporary_id: str, captcha: str, *, mobile: str | None = None
+    ) -> TemporaryRegistration:
+        """Look a temporary registration up by its id. One captcha."""
+        text = captcha.strip()
+        if not text:
+            raise TaxpayerLookupError("captcha text must not be empty")
+        payload = {
+            "tempId": temporary_id.strip().upper(),
+            "stateCd": None,
+            "mobNum": mobile,
+            "captcha": text,
+        }
+        try:
+            response = await self._client.post(
+                self.TEMPORARY_PATH, json=payload, headers=self._details_headers()
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as error:
+            raise TaxpayerLookupError(
+                f"request to {self.TEMPORARY_PATH} failed: {error}"
+            ) from error
+        return self._as_temporary(response)
 
     async def _get(self, path: str, gstin: GSTIN | str, **params: str) -> httpx.Response:
         """GET a captcha-free endpoint, opening a portal session if needed."""

@@ -26,6 +26,11 @@ it. Worth knowing:
   business in plain text. `--no-cache` turns it off and `--clear-cache` empties
   it. The library does not cache to disk unless you pass `DiskCache` yourself.
   A PAN search is not cached at all, so its results never reach the disk.
+- **The practitioner directory is personal data.** `search_practitioners()`
+  returns named private individuals. The portal publishes a personal phone
+  number and email address alongside each one; this package does not carry
+  either, and narrowing the search is required rather than optional. Do not
+  use it to build a contact list.
 - **Credentials.** The package stores no credentials and needs none. Releases
   are published with PyPI Trusted Publishing, so no long-lived token exists in
   this repository.
