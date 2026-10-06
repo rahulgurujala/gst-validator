@@ -160,7 +160,8 @@ with GSTClient() as client:
     # commodity and service codes - free, so batch them freely
     for code in client.search_hsn_codes("3926"):
         print(code.code, code.is_service, code.description)
-    client.search_hsn_codes("plastic", by="description")
+    client.search_hsn_codes("plastic", by="description")  # goods
+    client.search_hsn_codes("transport", by="description", goods=False)  # services
 
     # a registered practitioner, by enrolment number
     client.search_practitioners(enrolment_number="351800000001GP9")

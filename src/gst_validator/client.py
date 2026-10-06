@@ -427,18 +427,25 @@ class GSTClient(_BaseGSTClient):
             ) from error
         return self._as_registrations(response)
 
-    def search_hsn_codes(self, text: str, *, by: str = "code") -> tuple[HSNCode, ...]:
+    def search_hsn_codes(
+        self, text: str, *, by: str = "code", goods: bool = True
+    ) -> tuple[HSNCode, ...]:
         """Look a commodity or service code up by code or description.
 
-        Needs no captcha and no session. ``by="code"`` matches leading digits,
-        ``by="description"`` matches words. An unknown code answers with an
-        empty tuple rather than an error.
+        Needs no captcha and no session. ``by="code"`` matches leading digits
+        and covers goods and services together. ``by="description"`` matches
+        words, and the portal requires a category there, so ``goods`` picks
+        which: ``True`` for HSN, ``False`` for SAC. An unknown code answers
+        with an empty tuple rather than an error.
         """
+        # A description search sent without a category returns nothing at all,
+        # which is why this is not simply left out.
         selected = "byCode" if by == "code" else "byDesc"
+        category = "null" if by == "code" else ("P" if goods else "S")
         try:
             response = self._client.get(
                 self.HSN_URL,
-                params={"inputText": text, "selectedType": selected, "category": "null"},
+                params={"inputText": text, "selectedType": selected, "category": category},
                 headers=self._api_headers(),
             )
             response.raise_for_status()
@@ -461,15 +468,28 @@ class GSTClient(_BaseGSTClient):
         directory dump rather than a lookup, and is not what the portal
         publishes this for. See :class:`~gst_validator.search.GSTPractitioner`.
         """
-        payload: dict[str, Any] = {
-            "searchType": "E" if enrolment_number else "A",
-            "trpNam": name,
-            "stCd": state_code,
-            "dstCd": None,
-            "pinCd": pincode or "",
-        }
+        # The portal sends two different shapes here, and they are not
+        # interchangeable: an area search ("A") carries no enrlNo key at all
+        # and nulls the name, while an enrolment search ("B") carries empty
+        # strings. Merging them earns SWEB_8000 or FO8001.
+        payload: dict[str, Any]
         if enrolment_number:
-            payload["enrlNo"] = enrolment_number
+            payload = {
+                "trpNam": "",
+                "stCd": "",
+                "dstCd": None,
+                "pinCd": "",
+                "enrlNo": enrolment_number.strip().upper(),
+                "searchType": "B",
+            }
+        else:
+            payload = {
+                "searchType": "A",
+                "trpNam": name,
+                "stCd": state_code,
+                "dstCd": None,
+                "pinCd": pincode or "",
+            }
         try:
             response = self._client.post(
                 self.PRACTITIONER_PATH, json=payload, headers=self._api_headers()
@@ -706,18 +726,25 @@ class AsyncGSTClient(_BaseGSTClient):
             ) from error
         return self._as_registrations(response)
 
-    async def search_hsn_codes(self, text: str, *, by: str = "code") -> tuple[HSNCode, ...]:
+    async def search_hsn_codes(
+        self, text: str, *, by: str = "code", goods: bool = True
+    ) -> tuple[HSNCode, ...]:
         """Look a commodity or service code up by code or description.
 
-        Needs no captcha and no session. ``by="code"`` matches leading digits,
-        ``by="description"`` matches words. An unknown code answers with an
-        empty tuple rather than an error.
+        Needs no captcha and no session. ``by="code"`` matches leading digits
+        and covers goods and services together. ``by="description"`` matches
+        words, and the portal requires a category there, so ``goods`` picks
+        which: ``True`` for HSN, ``False`` for SAC. An unknown code answers
+        with an empty tuple rather than an error.
         """
+        # A description search sent without a category returns nothing at all,
+        # which is why this is not simply left out.
         selected = "byCode" if by == "code" else "byDesc"
+        category = "null" if by == "code" else ("P" if goods else "S")
         try:
             response = await self._client.get(
                 self.HSN_URL,
-                params={"inputText": text, "selectedType": selected, "category": "null"},
+                params={"inputText": text, "selectedType": selected, "category": category},
                 headers=self._api_headers(),
             )
             response.raise_for_status()
@@ -740,15 +767,28 @@ class AsyncGSTClient(_BaseGSTClient):
         directory dump rather than a lookup, and is not what the portal
         publishes this for. See :class:`~gst_validator.search.GSTPractitioner`.
         """
-        payload: dict[str, Any] = {
-            "searchType": "E" if enrolment_number else "A",
-            "trpNam": name,
-            "stCd": state_code,
-            "dstCd": None,
-            "pinCd": pincode or "",
-        }
+        # The portal sends two different shapes here, and they are not
+        # interchangeable: an area search ("A") carries no enrlNo key at all
+        # and nulls the name, while an enrolment search ("B") carries empty
+        # strings. Merging them earns SWEB_8000 or FO8001.
+        payload: dict[str, Any]
         if enrolment_number:
-            payload["enrlNo"] = enrolment_number
+            payload = {
+                "trpNam": "",
+                "stCd": "",
+                "dstCd": None,
+                "pinCd": "",
+                "enrlNo": enrolment_number.strip().upper(),
+                "searchType": "B",
+            }
+        else:
+            payload = {
+                "searchType": "A",
+                "trpNam": name,
+                "stCd": state_code,
+                "dstCd": None,
+                "pinCd": pincode or "",
+            }
         try:
             response = await self._client.post(
                 self.PRACTITIONER_PATH, json=payload, headers=self._api_headers()

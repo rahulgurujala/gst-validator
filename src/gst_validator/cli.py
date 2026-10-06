@@ -162,6 +162,11 @@ def _parser() -> argparse.ArgumentParser:
         help="how --hsn matches (default: code)",
     )
     searches.add_argument(
+        "--services",
+        action="store_true",
+        help="with --hsn --by description, search service codes instead of goods",
+    )
+    searches.add_argument(
         "--practitioner",
         action="store_true",
         help="find GST practitioners; narrow with --state, --pincode or --enrolment",
@@ -674,7 +679,7 @@ def _run_hsn(args: argparse.Namespace, fmt: str) -> int:
     with GSTClient(cache=NullCache()) as client:
         try:
             for term in terms:
-                found.extend(client.search_hsn_codes(term, by=args.by))
+                found.extend(client.search_hsn_codes(term, by=args.by, goods=not args.services))
         except GSTValidatorError as error:
             err.print(Text(str(error), style="err"))
             return 1
@@ -686,8 +691,16 @@ def _run_hsn(args: argparse.Namespace, fmt: str) -> int:
 
 def _run_practitioner(args: argparse.Namespace, fmt: str) -> int:
     """GST practitioner directory. No captcha."""
-    if not (args.state or args.pincode or args.enrolment):
-        err.print(Text("give --state, --pincode or --enrolment to search", style="err"))
+    # An area search is state-first: the portal refuses a pincode on its own
+    # with EM_SRS_FO_016_02. An enrolment number stands alone.
+    if not (args.enrolment or args.state):
+        err.print(
+            Text(
+                "give --enrolment for one practitioner, or --state "
+                "(optionally with --pincode) to search an area",
+                style="err",
+            )
+        )
         return 2
     with GSTClient(cache=NullCache()) as client:
         try:

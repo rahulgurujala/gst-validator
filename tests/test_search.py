@@ -76,7 +76,8 @@ class TestHSNCode:
         with GSTClient(transport=_transport({"qsearch": {"data": []}})) as client:
             assert client.search_hsn_codes("0000") == ()
 
-    def test_description_search_sends_the_other_selector(self) -> None:
+    @staticmethod
+    def _params_seen(by: str = "code", *, goods: bool = True) -> dict[str, str]:
         seen: dict[str, str] = {}
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -84,7 +85,22 @@ class TestHSNCode:
             return httpx.Response(200, json={"data": []})
 
         with GSTClient(transport=httpx.MockTransport(handler)) as client:
-            client.search_hsn_codes("plastic", by="description")
+            client.search_hsn_codes("plastic", by=by, goods=goods)
+        return seen
+
+    def test_a_code_search_needs_no_category(self) -> None:
+        seen = self._params_seen()
+        assert seen["selectedType"] == "byCode"
+        assert seen["category"] == "null"
+
+    def test_a_description_search_must_send_a_category(self) -> None:
+        """Without one the portal answers with an empty list and no error, so
+        shipping it unset looked like "no matches" rather than a broken call."""
+        assert self._params_seen("description")["category"] == "P"
+        assert self._params_seen("description", goods=False)["category"] == "S"
+
+    def test_description_search_selects_the_right_endpoint_mode(self) -> None:
+        seen = self._params_seen("description")
         assert seen["selectedType"] == "byDesc"
         assert seen["inputText"] == "plastic"
 
@@ -130,7 +146,10 @@ class TestGSTPractitioner:
             found = client.search_practitioners(state_code="35")
         assert len(found) == 2
 
-    def test_enrolment_number_switches_the_search_type(self) -> None:
+    @staticmethod
+    def _body_seen(
+        *, enrolment_number: str | None = None, state_code: str | None = None
+    ) -> dict[str, Any]:
         seen: dict[str, Any] = {}
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -138,9 +157,31 @@ class TestGSTPractitioner:
             return httpx.Response(200, json=[])
 
         with GSTClient(transport=httpx.MockTransport(handler)) as client:
-            client.search_practitioners(enrolment_number="351800000001GP9")
-        assert seen["searchType"] == "E"
+            client.search_practitioners(enrolment_number=enrolment_number, state_code=state_code)
+        return seen
+
+    def test_an_enrolment_search_is_type_b(self) -> None:
+        """ "E" looked like the obvious letter and is refused with FO8001."""
+        seen = self._body_seen(enrolment_number="351800000001gp9")
+        assert seen["searchType"] == "B"
         assert seen["enrlNo"] == "351800000001GP9"
+
+    def test_an_area_search_is_type_a(self) -> None:
+        seen = self._body_seen(state_code="35")
+        assert seen["searchType"] == "A"
+        assert seen["stCd"] == "35"
+
+    def test_an_area_search_carries_no_enrolment_key(self) -> None:
+        """The two shapes are not interchangeable: adding enrlNo here earns
+        SWEB_8000, which is how this was broken once already."""
+        assert "enrlNo" not in self._body_seen(state_code="35")
+
+    def test_unused_fields_are_empty_strings_not_nulls(self) -> None:
+        """The portal refuses nulls here, which is how FO8001 was reached."""
+        seen = self._body_seen(enrolment_number="351800000001GP9")
+        assert seen["trpNam"] == ""
+        assert seen["stCd"] == ""
+        assert seen["pinCd"] == ""
 
 
 class TestCompositionTaxpayer:
@@ -323,7 +364,14 @@ class TestSearchCLI:
     def test_practitioner_needs_narrowing(self, capsys: pytest.CaptureFixture[str]) -> None:
         """A bare directory dump is not what this is for."""
         assert main(["--practitioner"]) == 2
-        assert "--state, --pincode or --enrolment" in capsys.readouterr().err
+        assert "--enrolment" in capsys.readouterr().err
+
+    def test_a_pincode_alone_is_refused_before_the_network(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The portal refuses it with EM_SRS_FO_016_02, so do not spend a call."""
+        assert main(["--practitioner", "--pincode", "744103"]) == 2
+        assert "--state" in capsys.readouterr().err
 
     def test_practitioner_single_lookup(
         self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch

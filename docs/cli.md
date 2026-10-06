@@ -150,10 +150,15 @@ gst-validator --pan "$pan" --json
 No captcha, no session, no limit - so a batch costs nothing:
 
 ```bash
-gst-validator --hsn 3926                      # by code
-gst-validator --hsn plastic --by description  # by words
+gst-validator --hsn 3926                                 # by code
+gst-validator --hsn plastic --by description             # goods, by words
+gst-validator --hsn transport --by description --services  # service codes
 gst-validator --hsn - --format csv < codes.txt > described.csv
 ```
+
+A code search covers goods and services together. A description search does
+not: the portal wants one or the other, so `--services` switches from HSN to
+SAC.
 
 `is_service` tells SAC codes from HSN codes, derived from the leading `99`
 rather than from any flag the portal sends.
@@ -184,11 +189,13 @@ a real problem, and a reference the portal does not recognise comes back with
 
 ```bash
 gst-validator --practitioner --enrolment 351800000001GP9
-gst-validator --practitioner --pincode 744103
+gst-validator --practitioner --state 35 --pincode 744103
 ```
 
 No captcha. The results describe named individuals, so the search has to be
-narrowed: `--state`, `--pincode` or `--enrolment` is required. The portal also
+narrowed: either `--enrolment` for one person, or `--state` for an area.
+A pincode on its own is refused by the portal, so it narrows `--state`
+rather than replacing it. The portal also
 publishes a phone number and an email address for each practitioner; this
 package does not carry either, because engaging one is done through the
 portal.
@@ -290,8 +297,12 @@ Also runnable as a module: `python -m gst_validator 27AAACR5055K1Z7`.
 | `--column NAME` | Read the input as CSV and take GSTINs from this column |
 | `--pan PAN` | List every GSTIN registered under this PAN; costs one captcha |
 | `--hsn TEXT` | Search HSN/SAC codes, with `--by code` or `--by description`; no captcha |
-| `--practitioner` | Find GST practitioners; narrow with `--enrolment`, `--pincode` or `--state` |
+| `--practitioner` | Find GST practitioners; needs `--enrolment`, or `--state` with an optional `--pincode` |
 | `--composition` | Composition-scheme list; needs `--state` and `--year`, one captcha |
+| `--opted-out` | With `--composition`, list those who left the scheme instead |
+| `--state CODE`, `--pincode PIN`, `--year FY`, `--enrolment NO` | Narrow the searches above |
+| `--by {code,description}` | How `--hsn` matches (default: `code`) |
+| `--services` | With `--hsn --by description`, search SAC codes instead of HSN |
 | `--arn ARN` | Track an application; one captcha |
 | `--rfn REF` | Verify a document reference number; one captcha |
 | `--temp-id ID` | Look up a temporary registration; one captcha |

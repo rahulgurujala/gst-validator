@@ -101,14 +101,20 @@ Each was found by watching the portal's own pages, then confirmed against a
 live response unless noted.
 
 **HSN/SAC codes** - `GET /commonservices/hsn/search/qsearch` with
-`inputText`, `selectedType` (`byCode` or `byDesc`) and `category=null`.
+`inputText` and `selectedType`. A `byCode` search takes `category=null` and
+covers goods and services together. A `byDesc` search **requires** a category,
+`P` for goods or `S` for services: sent without one it answers with an empty
+list and no error, which reads as "no matches" rather than a broken call.
 Captcha-free and session-free. Answers `{"data":[{"c":code,"n":description}]}`
 for goods and services from one endpoint, with no field telling them apart:
 `HSNCode.is_service` derives it from the `99` prefix. An unknown code returns
 an empty list, not an error.
 
 **GST practitioners** - `POST /api/search/gstp` with
-`{searchType, trpNam, stCd, dstCd, pinCd}`. Captcha-free, and it answers with
+`{searchType, trpNam, stCd, dstCd, pinCd, enrlNo}`. `searchType` is `A` to
+search an area and **`B`** to search by enrolment number, not the `E` the
+wording suggests; the unused fields must be empty strings rather than nulls,
+or the portal answers `FO8001`. Captcha-free, and it answers with
 a bare JSON list rather than an envelope. **It returns personal data**: a
 named individual, a personal mobile number, an email address and a working
 address. One unfiltered state query returned 22 people. This package models
