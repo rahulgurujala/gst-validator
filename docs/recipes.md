@@ -237,6 +237,40 @@ def lookup(session_id: str, gstin: str, captcha: str) -> dict[str, object]:
 `captcha.data_uri` goes straight into `<img src="...">`. Give `pending` an
 expiry: an abandoned entry holds a connection pool open.
 
+## Check whether a notice is genuine
+
+Fake GST notices are a known problem. Every real one carries a reference
+number (RFN), and the portal will say whether it issued it:
+
+```bash
+gst-validator --rfn RF2701250000001 --json
+```
+
+```python
+from gst_validator import GSTClient
+
+with GSTClient() as client:
+    solved = input(f"solve: {client.fetch_captcha().data_uri}\n> ")
+    notice = client.verify_reference_number("RF2701250000001", solved)
+
+if notice.is_genuine:
+    print("issued by the department on", notice.issued_on)
+else:
+    print("the department has no record of this reference")
+```
+
+A reference the portal does not recognise comes back with `is_genuine` false
+rather than raising, because "we have never seen this" is the answer you came
+for. Only a portal-level failure, such as a wrong captcha, raises.
+
+## Track an application you have filed
+
+```bash
+gst-validator --arn AA270125000000X
+```
+
+Returns the form, the status and the dates. One captcha.
+
 ## Keep results between runs
 
 Each lookup costs a human-solved captcha, so the CLI caches to disk for 24

@@ -114,8 +114,11 @@ an empty list, not an error.
 `{searchType, trpNam, stCd, dstCd, pinCd, enrlNo}`. `searchType` is `A` to
 search an area and **`B`** to search by enrolment number, not the `E` the
 wording suggests; the unused fields must be empty strings rather than nulls,
-or the portal answers `FO8001`. Captcha-free, and it answers with
-a bare JSON list rather than an envelope. **It returns personal data**: a
+or the portal answers `FO8001`. The two shapes are **not interchangeable**:
+an area search carries no `enrlNo` key at all and nulls the name, and adding
+one earns `SWEB_8000`. A pincode narrows a state rather than replacing it; on
+its own it is refused with `EM_SRS_FO_016_02`. Captcha-free, and it answers
+with a bare JSON list rather than an envelope. **It returns personal data**: a
 named individual, a personal mobile number, an email address and a working
 address. One unfiltered state query returned 22 people. This package models
 the enrolment number, name, category, pincode and address, and deliberately
@@ -125,11 +128,16 @@ drops the phone number and email.
 `{op, stcd, fy, captcha}`, where `op` is `O` for opted in and `R` for opted
 out. One captcha per state and financial year.
 
-**Track an application** - `GET /trackarn?arn=&captcha=`. One captcha.
+**Track an application** - `GET /trackarn?arn=&captcha=`. One captcha. An
+ARN, Application Reference Number, is the receipt the department issues for
+any application: a registration, an amendment, a refund, a cancellation.
 
 **Verify a document reference** - `POST /publicservices/api/verifyRfn` with
-`{refId, captcha}`. One captcha. A reference the portal does not recognise is
-an answer, not a failure, so it is reported rather than raised.
+`{refId, captcha}`. One captcha. An RFN, Reference Number of the document, is
+printed on notices and orders the department issues, and verifying one is how
+a recipient tells a genuine notice from a forged one. A reference the portal
+does not recognise is an answer, not a failure, so it is reported on
+`ReferenceNumber.is_genuine` rather than raised.
 
 **Temporary registration** - `POST /api/search/smreg` with
 `{tempId, stateCd, mobNum, captcha}`. Needs either the temporary id or the
@@ -217,9 +225,19 @@ and `MFT` is "Manufacturer" - note `MFT`, not the `MFR` the name suggests.
 The trader code has not been observed, so it is not mapped. An unknown code
 passes through unchanged rather than being guessed at.
 
-**`errorCode`**: `SWEB_9000` is a wrong or expired captcha. `SWEB_9035` is
-"Account is Locked", from the portal's published error list. Anything else is
-surfaced as-is on `TaxpayerLookupError.code`.
+**`errorCode`**, each seen live:
+
+| Code | What it meant |
+|---|---|
+| `SWEB_9000` | a wrong or expired captcha |
+| `SWEB_9035` | "Account is Locked", from the portal's published error list |
+| `SWEB_8000` | an `enrlNo` key sent on an area practitioner search |
+| `FO8001` | an unrecognised `searchType`, such as `E` instead of `B` |
+| `EM_SRS_FO_016_02` | "Please enter the mandatory fields": a pincode with no state |
+| `RT-NPRFA-1008` | nested under `error`, seen from the financial-year endpoint |
+
+Anything else is surfaced as-is on `TaxpayerLookupError.code`. Note that the
+first three arrive with HTTP 200, like every other portal rejection.
 
 ## Fields the search endpoint never returns
 
