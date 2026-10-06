@@ -580,6 +580,12 @@ def _bulk_exit_code(rows: Sequence[ValidationResult], fmt: str) -> int:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    """Run the command line and return its exit code.
+
+    Takes ``argv`` for testing; reads ``sys.argv`` when it is omitted. Returns
+    rather than exits, so it can be called from Python as well as installed as
+    the ``gst-validator`` script.
+    """
     args = _parser().parse_args(argv)
     if args.no_color:
         out.no_color = err.no_color = True

@@ -226,6 +226,7 @@ class GSTClient(_BaseGSTClient):
         self.close()
 
     def close(self) -> None:
+        """Close the connection pool; also done by ``with``."""
         self._client.close()
 
     def fetch_captcha(self) -> Captcha:
@@ -347,9 +348,11 @@ class AsyncGSTClient(_BaseGSTClient):
         await self.aclose()
 
     async def aclose(self) -> None:
+        """Close the connection pool; also done by ``async with``."""
         await self._client.aclose()
 
     async def fetch_captcha(self) -> Captcha:
+        """Open a portal session and download its captcha image."""
         try:
             (await self._client.get(self.SEARCH_PATH)).raise_for_status()
             self._session_ready = True
@@ -367,6 +370,11 @@ class AsyncGSTClient(_BaseGSTClient):
     async def fetch_details(
         self, gstin: GSTIN | str, captcha: str, *, refresh: bool = False
     ) -> TaxpayerDetails:
+        """Look up ``gstin`` with the text solved from :meth:`fetch_captcha`.
+
+        A cache hit short-circuits the request; pass ``refresh=True`` to force
+        a fresh lookup.
+        """
         number = gstin if isinstance(gstin, GSTIN) else GSTIN.parse(gstin)
         if not refresh and (hit := self._cache.get(number.value)) is not None:
             return hit

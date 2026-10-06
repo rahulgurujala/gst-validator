@@ -16,6 +16,26 @@ uv run pytest
 [uv](https://docs.astral.sh/uv/) manages the environment; you do not need to
 create a virtualenv yourself. Python 3.13+ is required.
 
+## Where things live
+
+```
+src/gst_validator/
+  gstin.py       the number itself: the three layouts, checksum, what each encodes
+  taxpayer.py    what the portal returns: details, address, jurisdiction, profile
+  captcha.py     the captcha image
+  bulk.py        validating and enriching many at once
+  client.py      the sync and async HTTP clients
+  cache.py       the in-memory and on-disk caches
+  cli.py         the command line, a thin shell over the rest
+  exceptions.py  the one exception tree
+  _parsing.py    shared normalisers for the portal's loose JSON
+  models.py      re-exports the types, so older imports keep working
+```
+
+Tests mirror that: `test_gstin.py`, `test_taxpayer.py`, `test_client.py`,
+`test_cache.py`, `test_bulk.py`, `test_cli.py` and `test_packaging.py`, with
+shared payloads and helpers in `tests/support.py`.
+
 ## Before opening a pull request
 
 Run what CI runs:

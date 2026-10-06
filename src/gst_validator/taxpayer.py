@@ -244,10 +244,16 @@ class TaxpayerDetails:
 
     @property
     def is_active(self) -> bool:
+        """True only for status "Active"; "Inactive" is not active either."""
         return (self.status or "").casefold() == "active"
 
     @property
     def is_cancelled(self) -> bool:
+        """True for any cancelled status.
+
+        Matched on the prefix because the portal says "Cancelled suo-moto"
+        rather than the bare word, which an equality check would miss.
+        """
         return (self.status or "").casefold().startswith("cancel")
 
     @property
@@ -388,14 +394,17 @@ class TaxpayerProfile:
 
     @property
     def gstin(self) -> str:
+        """Shortcut for ``details.gstin``."""
         return self.details.gstin
 
     @property
     def name(self) -> str | None:
+        """Shortcut for ``details.name``: trade name, else legal name."""
         return self.details.name
 
     @property
     def is_active(self) -> bool:
+        """Shortcut for ``details.is_active``."""
         return self.details.is_active
 
     def as_dict(self) -> dict[str, Any]:
