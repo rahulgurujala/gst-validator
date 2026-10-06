@@ -445,3 +445,29 @@ class TestValidatePan:
 
         with pytest.raises(InvalidPANError):
             validate_pan("MUMA12345B")
+
+
+class TestUnionTerritoryInOutput:
+    """The flag has to be reachable from the command line, not just Python."""
+
+    def test_json_carries_it(self, capsys: pytest.CaptureFixture[str]) -> None:
+        assert main(["38AAACR5055K1Z4", "--offline", "--json"]) == 0
+        assert json.loads(capsys.readouterr().out)["is_union_territory"] is True
+
+    def test_json_carries_it_as_false_for_a_state(self, capsys: pytest.CaptureFixture[str]) -> None:
+        assert main([VALID_GSTIN, "--offline", "--json"]) == 0
+        assert json.loads(capsys.readouterr().out)["is_union_territory"] is False
+
+    def test_the_table_shows_it_only_when_true(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """A line saying "False" on every ordinary registration is noise."""
+        assert main(["38AAACR5055K1Z4", "--offline", "--no-color"]) == 0
+        assert "is union territory" in capsys.readouterr().out
+        assert main([VALID_GSTIN, "--offline", "--no-color"]) == 0
+        assert "is union territory" not in capsys.readouterr().out
+
+    def test_an_invalid_row_reports_none_not_false(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Unknown is not the same as "not a union territory"."""
+        assert main(["NOPE", "--offline", "--format", "jsonl"]) == 2
+        assert json.loads(capsys.readouterr().out)["is_union_territory"] is None

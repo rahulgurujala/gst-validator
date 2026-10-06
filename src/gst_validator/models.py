@@ -5,7 +5,7 @@ The types live in focused modules now; this one re-exports them so that
 """
 
 from .captcha import Captcha, StrPath
-from .gstin import GSTIN, GSTINLayout, validate_pan
+from .gstin import GSTIN, GSTINLayout
 from .taxpayer import (
     Address,
     FilingPreference,
@@ -30,5 +30,4 @@ __all__ = [
     "StrPath",
     "TaxpayerDetails",
     "TaxpayerProfile",
-    "validate_pan",
 ]

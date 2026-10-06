@@ -27,7 +27,6 @@ body:
     attributes:
       label: Version
       description: Output of `gst-validator --version`.
-      placeholder: "0.2.0"
     validations:
       required: true
   - type: input

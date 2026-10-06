@@ -56,6 +56,7 @@ class ValidationResult:
             "gstin": gstin.value if gstin else None,
             "state_code": gstin.state_code if gstin else None,
             "state_name": gstin.state_name if gstin else None,
+            "is_union_territory": gstin.is_union_territory if gstin else None,
             "identifier": gstin.identifier if gstin else None,
             "identifier_type": gstin.identifier_type if gstin else None,
             "pan": gstin.pan if gstin else None,

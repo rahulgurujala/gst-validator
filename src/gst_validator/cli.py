@@ -26,7 +26,8 @@ from .bulk import RESULT_KEYS, ValidationResult, enrich_many, validate_many
 from .cache import DiskCache, NullCache, TaxpayerCache
 from .client import GSTClient
 from .exceptions import GSTValidatorError, InvalidPANError
-from .models import GSTIN, Registration, TaxpayerProfile, validate_pan
+from .gstin import validate_pan
+from .models import GSTIN, Registration, TaxpayerProfile
 
 __all__ = ["main"]
 
@@ -346,6 +347,7 @@ def _offline_fields(gstin: GSTIN) -> dict[str, object]:
         "valid": True,
         "state_code": gstin.state_code,
         "state_name": gstin.state_name,
+        "is_union_territory": gstin.is_union_territory,
         "identifier": gstin.identifier,
         "identifier_type": gstin.identifier_type,
         "pan": gstin.pan,
@@ -409,7 +411,9 @@ def _offline_table(gstin: GSTIN) -> Table:
     table.add_column("field", style="label", no_wrap=True)
     table.add_column("value")
     for key, value in _offline_fields(gstin).items():
-        if key in ("gstin", "valid") or value is None:
+        # `is_union_territory` is the only boolean here, and reads as a flag:
+        # worth a line when true, noise on every ordinary registration.
+        if key in ("gstin", "valid") or value is None or value is False:
             continue
         table.add_row(key.replace("_", " "), Text(str(value)))
     return table
@@ -521,6 +525,15 @@ def _emit_registrations(rows: Sequence[Registration], fmt: str) -> None:
             for payload in payloads:
                 print(json.dumps(payload, ensure_ascii=False))
         case "json" | "raw":
+            if fmt == "raw":
+                # `raw` promises the portal's own body. A registration row keeps
+                # none on purpose, so say that rather than pass JSON off as it.
+                err.print(
+                    Text(
+                        "the PAN search keeps no raw body; printing JSON instead",
+                        style="warn",
+                    )
+                )
             print(json.dumps(payloads, indent=2, ensure_ascii=False))
         case _:
             out.print(_registrations_table(rows))
@@ -531,7 +544,8 @@ def _run_pan(args: argparse.Namespace, fmt: str) -> int:
     try:
         pan = validate_pan(args.pan)
     except InvalidPANError as error:
-        err.print(Text.assemble(("invalid PAN ", "err"), str(error)))
+        # The exception already reads "invalid PAN '...': reason".
+        err.print(Text(str(error), style="err"))
         return 2
     with GSTClient(cache=_cache_for(args)) as client:
         try:
@@ -717,7 +731,8 @@ def _dispatch(args: argparse.Namespace, fmt: str) -> int:
         try:
             gstins.append(GSTIN.parse(raw))
         except GSTValidatorError as error:
-            err.print(Text.assemble(("invalid GSTIN ", "err"), str(error)))
+            # The exception already reads "invalid GSTIN '...': reason".
+            err.print(Text(str(error), style="err"))
             worst = 2
     if not gstins:
         return worst

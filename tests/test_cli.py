@@ -68,6 +68,7 @@ class TestOfflineOutput:
             "gstin": VALID_GSTIN,
             "state_code": "27",
             "state_name": "Maharashtra",
+            "is_union_territory": False,
             "identifier": "ABCFE1234F",
             "identifier_type": "PAN",
             "pan": "ABCFE1234F",
@@ -467,3 +468,85 @@ class TestPanFlag:
         captured = capsys.readouterr()
         assert "data:image/png;base64," in captured.err
         assert isinstance(json.loads(captured.out), list)
+
+
+class TestErrorMessagesAreNotDoubled:
+    """Each failure is announced once, not with the prefix repeated.
+
+    The exceptions already name themselves - "invalid GSTIN 'X': reason" - so
+    a renderer that prepends "invalid GSTIN " too produced "invalid GSTIN
+    invalid GSTIN 'X': ...". Asserting the substring is present does not catch
+    that, which is why it survived; these count instead.
+    """
+
+    @staticmethod
+    def _dead_transport() -> httpx.MockTransport:
+        def handler(request: httpx.Request) -> httpx.Response:
+            match request.url.path:
+                case "/services/searchtp":
+                    return httpx.Response(200, text="<html></html>")
+                case "/services/captcha":
+                    return httpx.Response(
+                        200, content=b"\x89PNG", headers={"content-type": "image/png"}
+                    )
+                case _:
+                    return httpx.Response(503)
+
+        return httpx.MockTransport(handler)
+
+    def test_invalid_gstin_is_announced_once_offline(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert main(["NOPE", "--offline"]) == 2
+        assert capsys.readouterr().err.count("invalid GSTIN") == 1
+
+    def test_invalid_gstin_is_announced_once_online(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("gst_validator.cli.GSTClient", client_factory(transport()))
+        assert main(["NOPE"]) == 2
+        assert capsys.readouterr().err.count("invalid GSTIN") == 1
+
+    def test_invalid_pan_is_announced_once(self, capsys: pytest.CaptureFixture[str]) -> None:
+        assert main(["--pan", "NOPE"]) == 2
+        assert capsys.readouterr().err.count("invalid PAN") == 1
+
+    def test_a_transport_failure_is_not_prefixed_twice(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("gst_validator.cli.GSTClient", client_factory(self._dead_transport()))
+        monkeypatch.setattr("builtins.input", answer("1a2b3"))
+        assert main(["--pan", "AAACR5055K", "--json"]) == 1
+        stderr = capsys.readouterr().err
+        assert stderr.count("PAN lookup failed") == 1
+        assert "failed: request to" in stderr  # the client names the endpoint, once
+
+    def test_every_invalid_row_is_named_once_in_a_batch(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert main(["NOPE", "ALSOBAD", "--offline"]) == 2
+        assert capsys.readouterr().err.count("invalid GSTIN") == 2
+
+
+class TestRawFormatHonesty:
+    """`raw` means the portal's own body, and a PAN row does not keep one."""
+
+    def test_pan_raw_says_it_is_printing_json_instead(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("gst_validator.cli.GSTClient", client_factory(transport()))
+        monkeypatch.setattr("builtins.input", answer("1a2b3"))
+        assert main(["--pan", "AAACR5055K", "--raw"]) == 0
+        captured = capsys.readouterr()
+        assert "keeps no raw body" in captured.err
+        assert len(json.loads(captured.out)) == 7
+
+    def test_a_gstin_lookup_raw_really_is_the_portal_body(
+        self, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("gst_validator.cli.GSTClient", client_factory(transport()))
+        monkeypatch.setattr("builtins.input", answer("1a2b3"))
+        assert main([VALID_GSTIN, "--raw"]) == 0
+        captured = capsys.readouterr()
+        assert json.loads(captured.out) == PAYLOAD
+        assert "keeps no raw body" not in captured.err

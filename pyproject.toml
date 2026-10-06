@@ -70,12 +70,12 @@ filterwarnings = ["error"]
 [tool.mypy]
 python_version = "3.13"
 strict = true
-files = ["src", "tests"]
+files = ["src", "tests", "scripts"]
 
 [tool.pyright]
 pythonVersion = "3.13"
 typeCheckingMode = "strict"
-include = ["src", "tests"]
+include = ["src", "tests", "scripts"]
 
 [tool.ruff]
 line-length = 100

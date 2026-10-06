@@ -97,13 +97,12 @@ class _BaseGSTClient:
 
     @classmethod
     def _pan_headers(cls) -> dict[str, str]:
-        """As :meth:`_details_headers`, but refered from the PAN search page."""
-        return {
-            "Accept": "application/json, text/plain, */*",
-            "Referer": f"{cls.BASE_URL}{cls.PAN_SEARCH_PATH}",
-            "Origin": "https://services.gst.gov.in",
-            "X-Requested-With": "XMLHttpRequest",
-        }
+        """As :meth:`_details_headers`, but referred from the PAN search page.
+
+        Derived rather than copied: the portal fingerprints clients, so the
+        two header sets must not drift apart.
+        """
+        return {**cls._details_headers(), "Referer": f"{cls.BASE_URL}{cls.PAN_SEARCH_PATH}"}
 
     @staticmethod
     def _as_captcha(response: httpx.Response) -> Captcha:
@@ -124,10 +123,11 @@ class _BaseGSTClient:
     @staticmethod
     def _pan_payload(pan: str, captcha: str) -> dict[str, str]:
         """Validate the PAN before a captcha is spent on it."""
+        number = validate_pan(pan)
         text = captcha.strip()
         if not text:
             raise TaxpayerLookupError("captcha text must not be empty")
-        return {"panNO": validate_pan(pan), "captcha": text}
+        return {"panNO": number, "captcha": text}
 
     @staticmethod
     def _as_registrations(response: httpx.Response) -> tuple[Registration, ...]:
@@ -299,7 +299,7 @@ class GSTClient(_BaseGSTClient):
             )
             response.raise_for_status()
         except httpx.HTTPError as error:
-            raise TaxpayerLookupError(f"lookup failed: {error}") from error
+            raise TaxpayerLookupError(f"request to {self.DETAILS_PATH} failed: {error}") from error
         details = self._as_details(response)
         self._cache.set(number.value, details)
         return details
@@ -345,7 +345,9 @@ class GSTClient(_BaseGSTClient):
             )
             response.raise_for_status()
         except httpx.HTTPError as error:
-            raise TaxpayerLookupError(f"PAN lookup failed: {error}") from error
+            raise TaxpayerLookupError(
+                f"request to {self.REGISTRATIONS_PATH} failed: {error}"
+            ) from error
         return self._as_registrations(response)
 
     def _get(self, path: str, gstin: GSTIN | str, **params: str) -> httpx.Response:
@@ -438,7 +440,7 @@ class AsyncGSTClient(_BaseGSTClient):
             )
             response.raise_for_status()
         except httpx.HTTPError as error:
-            raise TaxpayerLookupError(f"lookup failed: {error}") from error
+            raise TaxpayerLookupError(f"request to {self.DETAILS_PATH} failed: {error}") from error
         details = self._as_details(response)
         self._cache.set(number.value, details)
         return details
@@ -483,7 +485,9 @@ class AsyncGSTClient(_BaseGSTClient):
             )
             response.raise_for_status()
         except httpx.HTTPError as error:
-            raise TaxpayerLookupError(f"PAN lookup failed: {error}") from error
+            raise TaxpayerLookupError(
+                f"request to {self.REGISTRATIONS_PATH} failed: {error}"
+            ) from error
         return self._as_registrations(response)
 
     async def _get(self, path: str, gstin: GSTIN | str, **params: str) -> httpx.Response:

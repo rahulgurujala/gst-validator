@@ -19,7 +19,12 @@ from typing import Any
 
 import httpx
 
-from gst_validator.gstin import _STATE_NAMES, _UNION_TERRITORIES
+# Reading these private tables is this script's entire job: it exists to
+# check them against the portal, so it is the one caller that should.
+from gst_validator.gstin import (
+    _STATE_NAMES,  # pyright: ignore[reportPrivateUsage]
+    _UNION_TERRITORIES,  # pyright: ignore[reportPrivateUsage]
+)
 
 MASTER_URL = "https://services.gst.gov.in/master/allstates"
 USER_AGENT = (
@@ -47,8 +52,8 @@ def fetch_master() -> list[dict[str, Any]]:
 
 def main() -> int:
     rows = fetch_master()
-    portal = {row["c"]: row["n"] for row in rows}
-    portal_ut = {row["c"] for row in rows if row.get("u") == "Y"}
+    portal: dict[str, str] = {str(row["c"]): str(row["n"]) for row in rows}
+    portal_ut: frozenset[str] = frozenset(str(row["c"]) for row in rows if row.get("u") == "Y")
     problems: list[str] = []
 
     for code in sorted(portal.keys() - _STATE_NAMES.keys()):

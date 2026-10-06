@@ -409,7 +409,7 @@ class TestPanSearch:
             return httpx.Response(503)
 
         with GSTClient(transport=httpx.MockTransport(handler)) as client:
-            with pytest.raises(TaxpayerLookupError, match="PAN lookup failed"):
+            with pytest.raises(TaxpayerLookupError, match="request to /api/get/gstndtls failed"):
                 client.fetch_registrations_by_pan(PAN, "1a2b3")
 
     def test_the_request_is_refered_from_the_pan_search_page(self) -> None:

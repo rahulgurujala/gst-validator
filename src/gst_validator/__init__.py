@@ -11,6 +11,7 @@ from .exceptions import (
     InvalidPANError,
     TaxpayerLookupError,
 )
+from .gstin import validate_pan
 from .models import (
     GSTIN,
     Address,
@@ -23,7 +24,6 @@ from .models import (
     Registration,
     TaxpayerDetails,
     TaxpayerProfile,
-    validate_pan,
 )
 
 __all__ = [

@@ -38,6 +38,7 @@ $ gst-validator 27AAACR5055K1Z7 --offline --json
   "gstin": "27AAACR5055K1Z7",
   "state_code": "27",
   "state_name": "Maharashtra",
+  "is_union_territory": false,
   "identifier": "AAACR5055K",
   "identifier_type": "PAN",
   "pan": "AAACR5055K",

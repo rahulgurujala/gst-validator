@@ -59,8 +59,10 @@ FINYEAR_PAYLOAD: dict[str, object] = {
     "status": 1,
     "data": [{"year": "2025-2026", "value": "2025"}, {"year": "2026-2027", "value": "2026"}],
 }
-# A real capture: every GSTIN Reliance Industries holds under one PAN, as the
-# PAN search returned it. Public corporate registrations, trimmed to five rows.
+# A real capture: Reliance Industries' registrations under one PAN, as the PAN
+# search returned them. The live response held 68; seven are kept here, chosen
+# to cover both statuses and two union territories. Public corporate
+# registrations, not anyone's personal data.
 PAN = "AAACR5055K"
 REGISTRATIONS_PAYLOAD: dict[str, object] = json.loads(
     (Path(__file__).parent / "fixtures" / "registrations_by_pan.json").read_text()
