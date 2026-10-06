@@ -527,10 +527,10 @@ Shortcuts: `gstin`, `name`, `is_active`, `as_dict()`.
 | `taxpayer_type` | `dty` | `str \| None` |
 | `registration_date` | `rgdt` | `datetime.date \| None` |
 | `cancellation_date` | `cxdt` | `datetime.date \| None` |
-| `last_updated` | `lstupdt` | `datetime.date \| None` |
+| `last_updated` | `lstupdt` | `datetime.date \| None` (not seen from this endpoint) |
 | `nature_of_business` | `nba` | `tuple[str, ...]` |
 | `principal_address` | `pradr` | `Address \| None` |
-| `additional_addresses` | `adadr` | `tuple[Address, ...]` |
+| `additional_addresses` | `adadr` | `tuple[Address, ...]` (not seen from this endpoint) |
 | `central_jurisdiction` | `ctj`, `ctjCd` | `Jurisdiction` |
 | `state_jurisdiction` | `stj`, `stjCd` | `Jurisdiction` |
 | `einvoice_enabled` | `einvoiceStatus` | `bool \| None` |
@@ -579,15 +579,15 @@ supported route; this package drives the public, captcha-gated search.
 
 ```bash
 uv sync              # install, including dev dependencies
-uv run pytest        # 109 tests, fully offline via httpx.MockTransport
+uv run pytest        # 115 tests, fully offline via httpx.MockTransport
 uv run mypy          # strict
 uv run pyright       # strict
 uv run ruff check .
 ```
 
 Tests parse payloads with the exact shape the live portal returns
-(`tests/fixtures/`: a service provider, a manufacturer, a statutory body and a
-goods list, with the
+(`tests/fixtures/`: a service provider, a manufacturer, a statutory body, a
+cancelled registration and a goods list, with the
 identifying values replaced by fictional ones) and assert `unmapped == {}`,
 so a portal schema change fails the suite instead of quietly losing data.
 

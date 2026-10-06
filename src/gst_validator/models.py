@@ -407,9 +407,16 @@ class TaxpayerDetails:
     registration_date: date | None = None
     cancellation_date: date | None = None
     last_updated: date | None = None
+    """``lstupdt``, which the public search endpoint has never been seen to send."""
     nature_of_business: tuple[str, ...] = ()
     principal_address: Address | None = None
     additional_addresses: tuple[Address, ...] = ()
+    """Extra places of business.
+
+    The public search endpoint has not been seen to return ``adadr`` in any
+    live lookup, across companies, a bank, a manufacturer and two statutory
+    registrations, so this may only ever be populated from another source.
+    """
     central_jurisdiction: Jurisdiction = field(default_factory=Jurisdiction)
     state_jurisdiction: Jurisdiction = field(default_factory=Jurisdiction)
     einvoice_enabled: bool | None = None

@@ -1,0 +1,26 @@
+{
+  "ntcrbs": "SPO",
+  "adhrVFlag": "No",
+  "lgnm": "HOUSING DEVELOPMENT FINANCE CORPORATION LIMITED",
+  "stj": "State - Maharashtra,Zone - MUMBAI_SOUTH_WEST,Division - ANDHERI,Charge - ANDHERI_EAST_502 (Jurisdictional Office)",
+  "dty": "Regular",
+  "cxdt": "01/07/2023",
+  "gstin": "27AAACH0997E1ZL",
+  "nba": [
+    "Retail Business",
+    "Recipient of Goods or Services",
+    "Supplier of Services"
+  ],
+  "ekycVFlag": "No",
+  "cmpRt": "NA",
+  "rgdt": "01/07/2017",
+  "ctb": "Public Limited Company",
+  "pradr": {
+    "adr": "BACKBAY RECLAMATION, 165-166, HDFC House, HT Parekh Marg, HDFC Egro General Insurance Company Ltd Corporate Office, Churchgate, Mumbai, Mumbai, Maharashtra, 400020"
+  },
+  "sts": "Cancelled suo-moto",
+  "tradeNam": "HOUSING DEVLOPMENT FINANCE CORP LTD",
+  "isFieldVisitConducted": "No",
+  "ctj": "State - CBIC,Zone - MUMBAI,Commissionerate - MUMBAI-SOUTH,Division - DIVISION VII,Range - RANGE-II",
+  "einvoiceStatus": "Yes"
+}

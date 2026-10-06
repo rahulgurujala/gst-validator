@@ -1237,3 +1237,55 @@ class TestLegacyServiceCodes:
         # Codes are kept verbatim: a SAC is not always six digits.
         assert [item.code for item in items] == ["996511", "00440193"]
         assert all(item.is_service for item in items)
+
+
+class TestCancelledRegistration:
+    """A registration the portal has cancelled.
+
+    HDFC Ltd ceased to exist when it merged into HDFC Bank on 1 July 2023, and
+    its registration carries that date. This is the only live payload with
+    `cxdt` filled, so it is what `cancellation_date` and `is_cancelled` rest on.
+    """
+
+    @pytest.fixture
+    def cancelled(self) -> TaxpayerDetails:
+        path = Path(__file__).parent / "fixtures" / "taxpayer_cancelled.json"
+        return TaxpayerDetails.from_payload(json.loads(path.read_text()))
+
+    def test_status_is_more_than_the_word_cancelled(self, cancelled: TaxpayerDetails) -> None:
+        """The portal says "Cancelled suo-moto", so an equality check would miss it."""
+        assert cancelled.status == "Cancelled suo-moto"
+        assert cancelled.is_cancelled
+        assert not cancelled.is_active
+
+    def test_cancellation_date_is_parsed(self, cancelled: TaxpayerDetails) -> None:
+        assert cancelled.raw["cxdt"] == "01/07/2023"
+        assert cancelled.cancellation_date == date(2023, 7, 1)
+
+    def test_an_active_taxpayer_has_an_empty_cxdt(self) -> None:
+        active = TaxpayerDetails.from_payload(
+            json.loads((Path(__file__).parent / "fixtures" / "taxpayer_live.json").read_text())
+        )
+        assert active.raw["cxdt"] == ""
+        assert active.cancellation_date is None
+
+    def test_nothing_is_dropped(self, cancelled: TaxpayerDetails) -> None:
+        assert cancelled.unmapped == {}
+
+
+class TestOptionalPortalKeys:
+    """Keys the portal omits for some taxpayers but not others.
+
+    Observed across five live payloads: `ctb` is absent for one registration of
+    a body that carries it in another state, and `adhrVdt` only appears when
+    aadhaar is actually verified. Both must degrade to None, not raise.
+    """
+
+    def test_constitution_may_be_absent(self) -> None:
+        details = TaxpayerDetails.from_payload({"gstin": VALID_GSTIN, "lgnm": "X"})
+        assert details.constitution is None
+
+    def test_aadhaar_date_absent_when_unverified(self) -> None:
+        details = TaxpayerDetails.from_payload({"gstin": VALID_GSTIN, "adhrVFlag": "No"})
+        assert details.aadhaar_verified is False
+        assert details.aadhaar_verified_on is None
