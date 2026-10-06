@@ -7,8 +7,10 @@ Progress messages go to stderr for the same reason.
 
 import argparse
 import json
+import sys
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from importlib.metadata import version
 from pathlib import Path
 from typing import Any, cast
 
@@ -17,6 +19,7 @@ from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme
 
+from .cache import DiskCache, NullCache, TaxpayerCache
 from .client import GSTClient
 from .exceptions import GSTValidatorError
 from .models import GSTIN, TaxpayerProfile
@@ -50,7 +53,16 @@ def _parser() -> argparse.ArgumentParser:
         prog="gst-validator",
         description="Validate a GSTIN and fetch taxpayer details from the GST portal.",
     )
-    parser.add_argument("gstin", help="the 15-character GSTIN to look up")
+    parser.add_argument(
+        "gstin",
+        nargs="*",
+        help="one or more 15-character GSTINs, or - to read them from stdin",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {version('gst-validator')}",
+    )
     parser.add_argument(
         "--offline",
         action="store_true",
@@ -82,6 +94,16 @@ def _parser() -> argparse.ArgumentParser:
         "--captcha-base64",
         action="store_true",
         help="print the captcha as a base64 data URI instead of writing a file",
+    )
+    parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="do not read or write the on-disk cache of past lookups",
+    )
+    parser.add_argument(
+        "--clear-cache",
+        action="store_true",
+        help="delete every cached lookup and exit",
     )
     parser.add_argument(
         "--refresh",
@@ -201,27 +223,46 @@ def _lookup(client: GSTClient, gstin: GSTIN, args: argparse.Namespace) -> Taxpay
             written.unlink(missing_ok=True)
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
-    if args.no_color:
-        out.no_color = err.no_color = True
+def _read_gstins(values: Sequence[str]) -> Iterator[str]:
+    """Yield the GSTINs to process; "-" pulls one per line from stdin."""
+    for value in values:
+        if value == "-":
+            for line in sys.stdin:
+                token = line.strip()
+                if token:
+                    yield token
+        else:
+            yield value
 
+
+def _dump(payload: object, *, compact: bool) -> None:
+    """Pretty JSON for a single GSTIN, one object per line for a batch."""
+    print(json.dumps(payload, indent=None if compact else 2, ensure_ascii=False))
+
+
+def _cache_for(args: argparse.Namespace) -> TaxpayerCache:
+    """A lookup costs a captcha, so results persist between runs by default."""
+    return NullCache() if args.no_cache else DiskCache()
+
+
+def _one(raw: str, args: argparse.Namespace, *, compact: bool) -> int:
+    """Handle a single GSTIN and return its exit code."""
     try:
-        gstin = GSTIN.parse(args.gstin)
+        gstin = GSTIN.parse(raw)
     except GSTValidatorError as error:
         err.print(Text.assemble(("invalid: ", "err"), str(error)))
         return 2
 
     if args.offline:
         if args.as_json:
-            print(json.dumps(_offline_fields(gstin), indent=2))
+            _dump(_offline_fields(gstin), compact=compact)
         else:
             out.print(Text.assemble(("valid ", "ok"), (gstin.value, "gstin")))
             out.print(_offline_table(gstin))
         return 0
 
     try:
-        with GSTClient() as client:
+        with GSTClient(cache=_cache_for(args)) as client:
             cached = None if args.refresh else client.cached(gstin)
             if cached is None:
                 profile = _lookup(client, gstin, args)
@@ -236,18 +277,47 @@ def main(argv: Sequence[str] | None = None) -> int:
                     filing_preferences=client.fetch_filing_preferences(gstin),
                 )
         if args.raw:
-            print(json.dumps(profile.details.raw, indent=2, ensure_ascii=False))
+            _dump(profile.details.raw, compact=compact)
         elif args.as_json:
-            print(json.dumps(profile.as_dict(), indent=2, ensure_ascii=False))
+            _dump(profile.as_dict(), compact=compact)
         else:
             out.print(_profile_table(profile))
     except GSTValidatorError as error:
         err.print(Text.assemble(("lookup failed: ", "err"), str(error)))
         return 1
+    return 0
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = _parser().parse_args(argv)
+    if args.no_color:
+        out.no_color = err.no_color = True
+
+    if args.clear_cache:
+        removed = DiskCache().clear()
+        err.print(Text(f"cleared {removed} cached lookup(s)", style="label"))
+        return 0
+
+    try:
+        raws = list(_read_gstins(args.gstin))
     except (EOFError, KeyboardInterrupt):
         err.print("[warn]aborted[/]")
         return 130
-    return 0
+    if not raws:
+        err.print(Text("no GSTIN given", style="err"))
+        return 2
+
+    # One GSTIN keeps the indented JSON object it has always printed; a batch
+    # emits JSON Lines so the output streams into jq and friends.
+    compact = len(raws) > 1
+    worst = 0
+    try:
+        for raw in raws:
+            worst = max(worst, _one(raw, args, compact=compact))
+    except (EOFError, KeyboardInterrupt):
+        err.print("[warn]aborted[/]")
+        return 130
+    return worst
 
 
 if __name__ == "__main__":
