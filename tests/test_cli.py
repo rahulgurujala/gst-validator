@@ -284,3 +284,63 @@ class TestVersionFlag:
             main(["--version"])
         assert exit_info.value.code == 0
         assert metadata.version("gst-validator") in capsys.readouterr().out
+
+
+class TestLookupOutputFormats:
+    """The online path's formats, which only the captcha route reaches."""
+
+    @pytest.fixture(autouse=True)
+    def _client(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("gst_validator.cli.GSTClient", client_factory(transport()))
+        monkeypatch.setattr("builtins.input", answer("1a2b3"))
+
+    def test_jsonl_for_several_lookups(self, capsys: pytest.CaptureFixture[str]) -> None:
+        assert main([VALID_GSTIN, PUBLIC_GSTIN, "--format", "jsonl"]) == 0
+        rows = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line.strip()]
+        assert len(rows) == 2
+        assert rows[0]["legal_name"] == "ACME TRADERS"
+
+    def test_csv_for_a_lookup(self, capsys: pytest.CaptureFixture[str]) -> None:
+        assert main([VALID_GSTIN, "--format", "csv"]) == 0
+        lines = capsys.readouterr().out.strip().splitlines()
+        assert lines[0].startswith("gstin,legal_name,")
+        assert "ACME TRADERS" in lines[1]
+
+    def test_json_for_one_is_an_object_and_for_several_a_list(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert main([VALID_GSTIN, "--format", "json"]) == 0
+        assert isinstance(json.loads(capsys.readouterr().out), dict)
+        assert main([VALID_GSTIN, PUBLIC_GSTIN, "--format", "json"]) == 0
+        assert isinstance(json.loads(capsys.readouterr().out), list)
+
+    def test_an_invalid_input_among_valid_ones_still_looks_the_rest_up(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert main([VALID_GSTIN, "NOPE", "--format", "jsonl"]) == 2
+        captured = capsys.readouterr()
+        assert "invalid GSTIN" in captured.err
+        assert json.loads(captured.out)["gstin"] == VALID_GSTIN
+
+    def test_every_input_invalid_reports_without_touching_the_portal(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert main(["NOPE", "ALSO-BAD"]) == 2
+        assert capsys.readouterr().out == ""
+
+
+class TestCacheAndAbort:
+    def test_clear_cache_reports_and_exits(self, capsys: pytest.CaptureFixture[str]) -> None:
+        assert main(["--clear-cache"]) == 0
+        assert "cleared" in capsys.readouterr().err
+
+    def test_ctrl_c_at_the_prompt_is_not_a_crash(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        def interrupt(*_args: object, **_kwargs: object) -> str:
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr("gst_validator.cli.GSTClient", client_factory(transport()))
+        monkeypatch.setattr("builtins.input", interrupt)
+        assert main([VALID_GSTIN]) == 130
+        assert "aborted" in capsys.readouterr().err

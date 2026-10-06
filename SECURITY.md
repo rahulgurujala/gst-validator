@@ -19,6 +19,12 @@ it. Two things are worth knowing:
   and a place of business. Do not paste real responses into issues, pull
   requests or test fixtures; use a public company's registration or a
   fictional GSTIN.
+- **The command line caches to disk.** A lookup costs a human-solved captcha,
+  so results are kept for 24 hours under the platform cache directory
+  (`~/Library/Caches/gst-validator`, `${XDG_CACHE_HOME:-~/.cache}/gst-validator`
+  or `%LOCALAPPDATA%`). Those files hold a registered name and place of
+  business in plain text. `--no-cache` turns it off and `--clear-cache` empties
+  it. The library does not cache to disk unless you pass `DiskCache` yourself.
 - **Credentials.** The package stores no credentials and needs none. Releases
   are published with PyPI Trusted Publishing, so no long-lived token exists in
   this repository.

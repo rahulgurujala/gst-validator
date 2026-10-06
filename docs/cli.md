@@ -7,9 +7,13 @@ available from Python too, as [the library guide](library.md) shows.
 Run `gst-validator --help` for the full flag list with worked examples.
 
 ```
-gst-validator [-h] [--offline] [--json] [--details-only] [--raw]
-              [--captcha-path PATH] [--captcha-base64] [--refresh]
-              [--keep-captcha] GSTIN
+usage: gst-validator [-h] [--version] [--offline]
+                     [-f {table,json,jsonl,csv,raw}] [--json] [--column NAME]
+                     [-o PATH] [--enrich] [--details-only] [--raw]
+                     [--captcha-path CAPTCHA_PATH] [--captcha-base64]
+                     [--no-cache] [--clear-cache] [--refresh] [--keep-captcha]
+                     [--no-color]
+                     [gstin ...]
 ```
 
 ### Validate without touching the network
@@ -19,19 +23,29 @@ $ gst-validator 27AAACR5055K1Z7 --offline
 valid 27AAACR5055K1Z7
 state code             27
 state name             Maharashtra
+identifier             AAACR5055K
+identifier type        PAN
 pan                    AAACR5055K
 entity type            Company
 registration sequence  1
+registration type      Regular
 
 $ gst-validator 27AAACR5055K1Z7 --offline --json
 {
-  "gstin": "27AAACR5055K1Z7",
+  "input": "27AAACR5055K1Z7",
   "valid": true,
+  "error": null,
+  "gstin": "27AAACR5055K1Z7",
   "state_code": "27",
   "state_name": "Maharashtra",
+  "identifier": "AAACR5055K",
+  "identifier_type": "PAN",
   "pan": "AAACR5055K",
+  "tan": null,
   "entity_type": "Company",
-  "registration_sequence": "1"
+  "registration_sequence": "1",
+  "registration_type": "Regular",
+  "layout": "pan"
 }
 ```
 

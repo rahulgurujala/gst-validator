@@ -53,7 +53,8 @@ def screen(value: str) -> str | None:
     try:
         return GSTIN.parse(value).value  # normalised: stripped, upper-cased
     except InvalidGSTINError as error:
-        return None if print(f"skipping {value}: {error.reason}") else None
+        print(f"skipping {value}: {error.reason}")
+        return None
 ```
 
 ## Enrich a list without solving anything
