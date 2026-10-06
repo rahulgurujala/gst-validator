@@ -41,11 +41,16 @@ _GSTIN_PATTERN: Final = re.compile(
     r"^[0-9]{2}(?:[A-Z]{5}[0-9]{4}[A-Z]|[A-Z]{4}[0-9]{5}[A-Z])[1-9A-Z][A-Z][0-9A-Z]$"
 )
 
-# A non-resident provider of online services (OIDAR) gets a different layout
-# altogether: "99", the two-digit year of registration, a three-letter country
-# code, a five-digit serial and a two-letter service code, as in GoDaddy's
-# 9917USA29016OS6. The mod-36 check digit is computed the same way.
-_NON_RESIDENT_PATTERN: Final = re.compile(r"^99[0-9]{2}[A-Z]{3}[0-9]{5}[A-Z]{2}[0-9A-Z]$")
+# Two layouts share a shape that is nothing like the PAN-based one: four
+# digits, three letters, five digits, two letters, then the check digit.
+#
+#   9917USA29016OS6  GoDaddy, a non-resident provider of online services:
+#                    "99", year 17, country USA, serial 29016, "OS" for OIDAR.
+#   2317UNO00001UND  UNICEF India, a UIN holder: state 23, year 17, "UNO",
+#                    serial 00001, "UN" for a United Nations body.
+#
+# The mod-36 check digit is computed the same way for both.
+_SPECIAL_PATTERN: Final = re.compile(r"^[0-9]{4}[A-Z]{3}[0-9]{5}[A-Z]{2}[0-9A-Z]$")
 _CHECKSUM_ALPHABET: Final = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 _DATE_FORMATS: Final = ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d")
 
@@ -170,9 +175,7 @@ class GSTIN:
     value: str
 
     def __post_init__(self) -> None:
-        if not (
-            _GSTIN_PATTERN.fullmatch(self.value) or _NON_RESIDENT_PATTERN.fullmatch(self.value)
-        ):
+        if not (_GSTIN_PATTERN.fullmatch(self.value) or _SPECIAL_PATTERN.fullmatch(self.value)):
             raise InvalidGSTINError(self.value, "does not match the GSTIN format")
         if self.value[-1] != self._checksum(self.value[:14]):
             raise InvalidGSTINError(self.value, "checksum digit mismatch")
@@ -201,9 +204,28 @@ class GSTIN:
         return _CHECKSUM_ALPHABET[(36 - total % 36) % 36]
 
     @property
+    def _is_special(self) -> bool:
+        """True for either of the two layouts that carry no PAN."""
+        return _SPECIAL_PATTERN.fullmatch(self.value) is not None
+
+    @property
     def is_non_resident(self) -> bool:
         """True for the OIDAR layout issued to overseas service providers."""
-        return _NON_RESIDENT_PATTERN.fullmatch(self.value) is not None
+        return self._is_special and self.value[:2] == "99"
+
+    @property
+    def is_uin(self) -> bool:
+        """True for a Unique Identity Number, held by UN bodies and embassies.
+
+        They share the non-resident shape but carry a state code rather than
+        "99", as in UNICEF India's 2317UNO00001UND.
+        """
+        return self._is_special and self.value[:2] != "99"
+
+    @property
+    def holder_code(self) -> str | None:
+        """Characters 5-7 of either special layout: a country, or "UNO"."""
+        return self.value[4:7] if self._is_special else None
 
     @property
     def state_code(self) -> str:
@@ -221,8 +243,8 @@ class GSTIN:
 
     @property
     def registration_year(self) -> int | None:
-        """Characters 3-4 of a non-resident GSTIN, as a four-digit year."""
-        return 2000 + int(self.value[2:4]) if self.is_non_resident else None
+        """Characters 3-4 of either special layout, as a four-digit year."""
+        return 2000 + int(self.value[2:4]) if self._is_special else None
 
     @property
     def identifier(self) -> str | None:
@@ -230,7 +252,7 @@ class GSTIN:
 
         ``None`` for a non-resident, whose GSTIN carries neither.
         """
-        return None if self.is_non_resident else self.value[2:12]
+        return None if self._is_special else self.value[2:12]
 
     @property
     def identifier_type(self) -> str | None:
@@ -259,7 +281,7 @@ class GSTIN:
     @property
     def registration_sequence(self) -> str | None:
         """13th character: the Nth registration of this PAN in this state."""
-        return None if self.is_non_resident else self.value[12]
+        return None if self._is_special else self.value[12]
 
     @property
     def registration_type(self) -> str | None:
@@ -270,12 +292,12 @@ class GSTIN:
         Indian Oil hold "D" registrations beside theirs. An unrecognised letter
         is left unlabelled rather than guessed at.
         """
-        return None if self.is_non_resident else _REGISTRATION_TYPES.get(self.value[13])
+        return None if self._is_special else _REGISTRATION_TYPES.get(self.value[13])
 
     @property
     def is_regular(self) -> bool:
         """False for a non-resident, a TDS deductor or a TCS collector."""
-        return not self.is_non_resident and self.value[13] == "Z"
+        return not self._is_special and self.value[13] == "Z"
 
     def __str__(self) -> str:
         return self.value
@@ -402,6 +424,7 @@ class TaxpayerDetails:
     legal_name: str | None = None
     trade_name: str | None = None
     status: str | None = None
+    """``sts``. Seen live as "Active", "Inactive" and "Cancelled suo-moto"."""
     constitution: str | None = None
     taxpayer_type: str | None = None
     registration_date: date | None = None
@@ -426,6 +449,7 @@ class TaxpayerDetails:
     aadhaar_verified_on: date | None = None
     ekyc_status: str | None = None
     composition_rate: str | None = None
+    """``cmpRt``, which the portal answers as "NA" even for a composition dealer."""
     raw: dict[str, Any] = field(repr=False, default_factory=dict[str, Any])
 
     @classmethod

@@ -522,7 +522,7 @@ Shortcuts: `gstin`, `name`, `is_active`, `as_dict()`.
 | `legal_name` | `lgnm` | `str \| None` |
 | `trade_name` | `tradeNam` | `str \| None` |
 | `name` | (derived) | trade name, else legal name |
-| `status` | `sts` | `str \| None` |
+| `status` | `sts` | `str \| None` ("Active", "Inactive", "Cancelled suo-moto") |
 | `constitution` | `ctb` | `str \| None` |
 | `taxpayer_type` | `dty` | `str \| None` |
 | `registration_date` | `rgdt` | `datetime.date \| None` |
@@ -539,7 +539,7 @@ Shortcuts: `gstin`, `name`, `is_active`, `as_dict()`.
 | `aadhaar_verified` | `adhrVFlag` | `bool \| None` |
 | `aadhaar_verified_on` | `adhrVdt` | `datetime.date \| None` |
 | `ekyc_status` | `ekycVFlag` | `str \| None` |
-| `composition_rate` | `cmpRt` | `str \| None` |
+| `composition_rate` | `cmpRt` | `str \| None` (answered "NA" even for composition dealers) |
 | `raw` | everything | `dict[str, Any]` |
 
 Helpers: `is_active`, `is_cancelled`, `addresses` (principal first),
@@ -579,7 +579,7 @@ supported route; this package drives the public, captcha-gated search.
 
 ```bash
 uv sync              # install, including dev dependencies
-uv run pytest        # 115 tests, fully offline via httpx.MockTransport
+uv run pytest        # 124 tests, fully offline via httpx.MockTransport
 uv run mypy          # strict
 uv run pyright       # strict
 uv run ruff check .

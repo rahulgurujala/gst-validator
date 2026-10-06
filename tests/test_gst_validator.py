@@ -1289,3 +1289,85 @@ class TestOptionalPortalKeys:
         details = TaxpayerDetails.from_payload({"gstin": VALID_GSTIN, "adhrVFlag": "No"})
         assert details.aadhaar_verified is False
         assert details.aadhaar_verified_on is None
+
+
+class TestUinLayout:
+    """A Unique Identity Number, held by UN bodies and diplomatic missions.
+
+    UNICEF India's 2317UNO00001UND: state 23, year 17, "UNO", serial 00001,
+    "UN". Same shape as the non-resident layout but with a state code rather
+    than "99", and the portal has ten years of filings for it.
+    """
+
+    UIN = "2317UNO00001UND"
+
+    def test_parsed_and_distinguished_from_a_non_resident(self) -> None:
+        gstin = GSTIN.parse(self.UIN)
+        assert gstin.is_uin
+        assert not gstin.is_non_resident
+        assert gstin.holder_code == "UNO"
+        assert gstin.registration_year == 2017
+        assert gstin.state_name == "Madhya Pradesh"
+
+    def test_pan_fields_do_not_apply(self) -> None:
+        gstin = GSTIN.parse(self.UIN)
+        for value in (gstin.pan, gstin.tan, gstin.identifier, gstin.identifier_type):
+            assert value is None
+        assert gstin.registration_type is None
+        assert not gstin.is_regular
+
+    def test_checksum_applies_to_this_layout_too(self) -> None:
+        assert GSTIN.is_valid(self.UIN)
+        assert not GSTIN.is_valid(self.UIN[:-1] + "A")
+
+    def test_payload_is_a_un_body_with_several_keys_absent(self) -> None:
+        path = Path(__file__).parent / "fixtures" / "taxpayer_uin.json"
+        details = TaxpayerDetails.from_payload(json.loads(path.read_text()))
+        assert details.taxpayer_type == "United Nation Body"
+        assert details.is_active
+        # A UIN payload carries no trade name, constitution, nature of
+        # business or core business activity at all.
+        for key in ("tradeNam", "ctb", "nba", "ntcrbs"):
+            assert key not in details.raw
+        assert details.trade_name is None
+        assert details.constitution is None
+        assert details.nature_of_business == ()
+        assert details.core_business_activity is None
+        assert details.unmapped == {}
+
+
+class TestCompositionTaxpayer:
+    """A composition dealer, from the portal's own composition list.
+
+    The identity is replaced in the fixture because these registrations belong
+    to individuals; every field that describes the registration is untouched.
+    """
+
+    @pytest.fixture
+    def composition(self) -> TaxpayerDetails:
+        path = Path(__file__).parent / "fixtures" / "taxpayer_composition.json"
+        return TaxpayerDetails.from_payload(json.loads(path.read_text()))
+
+    def test_scheme_shows_in_the_taxpayer_type(self, composition: TaxpayerDetails) -> None:
+        """Not in the GSTIN: character 14 is "Z" here, as for any other dealer."""
+        assert composition.taxpayer_type == "Composition"
+        assert GSTIN.parse(composition.gstin).registration_type == "Regular"
+
+    def test_proprietorship_constitution(self, composition: TaxpayerDetails) -> None:
+        assert composition.constitution == "Proprietorship"
+        assert GSTIN.parse(composition.gstin).entity_type == "Individual"
+
+    def test_inactive_is_neither_active_nor_cancelled(self, composition: TaxpayerDetails) -> None:
+        """A third status: the portal reports "Inactive", with a date in cxdt."""
+        assert composition.status == "Inactive"
+        assert not composition.is_active
+        assert not composition.is_cancelled
+        assert composition.cancellation_date is not None
+
+    def test_composition_rate_is_still_not_sent(self, composition: TaxpayerDetails) -> None:
+        """Even for a composition dealer the portal answers cmpRt "NA"."""
+        assert composition.raw["cmpRt"] == "NA"
+        assert composition.composition_rate is None
+
+    def test_nothing_is_dropped(self, composition: TaxpayerDetails) -> None:
+        assert composition.unmapped == {}
