@@ -34,6 +34,9 @@ it. Worth knowing:
   number and email address alongside each one; this package does not carry
   either, and narrowing the search is required rather than optional. Do not
   use it to build a contact list.
+- **Scraping the portal is not a supported use.** This looks things up; it
+  does not mine. Enumerating GSTINs or rebuilding the register will get the
+  address blocked and is nobody's responsibility but the operator's.
 - **You can get your own address blocked.** The portal stops answering an
   address that sends too fast, and it takes every endpoint down together.
   The package paces itself, collapses duplicate in-flight requests and backs

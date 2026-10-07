@@ -42,8 +42,19 @@
 > warranty of any kind, and the authors accept no liability for any claim,
 > damage, or loss arising from its use. See [LICENSE](LICENSE).
 >
+> **Not a scraper.** The portal is a public service and was built for people
+> looking things up one at a time. Checking a supplier before you invoice
+> them is what this is for; enumerating GSTINs, rebuilding the register,
+> harvesting the practitioner directory, defeating the captcha or rotating
+> addresses to dodge a block are not. Do any of that and you will get your
+> address blocked along with everyone sharing it, and that is yours to deal
+> with - the licence gives you no warranty and us no liability, and we cannot
+> get you unblocked.
+>
 > For unattended or high-volume access, use the official
-> [GST API](https://developer.gst.gov.in/) through a licensed GSP.
+> [GST API](https://developer.gst.gov.in/) through a licensed GSP. Running
+> this behind a web service needs care either way: see
+> [the deployment guide](docs/deployment.md).
 
 A typed Python library and CLI for the Indian GST taxpayer search. It checks a
 GSTIN's structure and checksum without touching the network, and wraps the

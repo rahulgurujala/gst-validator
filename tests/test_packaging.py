@@ -47,15 +47,20 @@ class TestProseStyle:
 
     @staticmethod
     def _tracked_text_files() -> list[str]:
+        # --others --exclude-standard adds files not yet committed. Without
+        # them a brand new document escapes every check here until someone
+        # remembers to re-run the suite after `git add`, which is exactly
+        # when a new document is least likely to be clean.
         listing = subprocess.run(
-            ["git", "ls-files", "-z"],
+            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
             capture_output=True,
             text=True,
             check=True,
             cwd=ROOT,
         )
         suffixes = (".md", ".py", ".toml", ".yml", ".yaml", ".json", ".txt")
-        return [name for name in listing.stdout.split("\0") if name.endswith(suffixes)]
+        names = {name for name in listing.stdout.split("\0") if name.endswith(suffixes)}
+        return sorted(name for name in names if (ROOT / name).is_file())
 
     def test_no_smart_punctuation(self) -> None:
         # Built with chr() so this file does not trip its own check: the

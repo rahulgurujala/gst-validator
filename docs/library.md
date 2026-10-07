@@ -387,6 +387,7 @@ GSTClient(proxy="http://proxy.internal:3128")
 | `IntervalLimiter` | spaces requests out; the default is one per second |
 | `SingleFlight` | concurrent identical captcha-free calls become one request |
 | `CircuitBreaker` | after a block, stops sending for five minutes |
+| `NullLimiter` | never waits; for tests, and nothing else |
 
 `proxy` is passed straight to httpx, for a network that requires an egress
 proxy or for pointing at a debugging one. It is not a way around a block: the
