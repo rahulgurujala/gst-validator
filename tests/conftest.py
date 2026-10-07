@@ -16,7 +16,8 @@ def no_pacing(monkeypatch: pytest.MonkeyPatch) -> None:
     slow test suite, so the default is zeroed here. `_Pacer` is tested on its
     own, and the default itself is asserted in test_client.
     """
-    monkeypatch.setattr("gst_validator.client._DEFAULT_MIN_INTERVAL", 0.0)
+    monkeypatch.setattr("gst_validator.limits.DEFAULT_MIN_INTERVAL", 0.0)
+    monkeypatch.setattr("gst_validator.client.DEFAULT_MIN_INTERVAL", 0.0)
 
 
 @pytest.fixture(autouse=True)

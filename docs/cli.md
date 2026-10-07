@@ -373,8 +373,13 @@ the portal's firewall rejected this client, which it does after a burst of
 requests from one address; it clears on its own, so wait and retry
 ```
 
-**Wait it out.** The block is on the address, not the session, so a new client
-will not help. Changing address to get around it is not what `--proxy` is for.
+**Wait it out.** The block is on the address, not the session, so a new
+client will not help. Changing address to get around it is not what `--proxy`
+is for. The command line also stops sending for five minutes once it sees a
+block, rather than hammering a shut door.
+
+Running this behind a web service, where every user's request leaves from one
+address, needs more care: see [the deployment guide](deployment.md).
 
 ### `--proxy`
 

@@ -12,6 +12,14 @@ from .exceptions import (
     TaxpayerLookupError,
 )
 from .gstin import validate_pan
+from .limits import (
+    CircuitBreaker,
+    IntervalLimiter,
+    NullLimiter,
+    PortalBlockedError,
+    RateLimiter,
+    SingleFlight,
+)
 from .models import (
     GSTIN,
     Address,
@@ -42,6 +50,7 @@ __all__ = [
     "AsyncGSTClient",
     "Captcha",
     "CaptchaError",
+    "CircuitBreaker",
     "CompositionTaxpayer",
     "DiskCache",
     "FilingPreference",
@@ -52,12 +61,17 @@ __all__ = [
     "GSTValidatorError",
     "GoodsOrService",
     "HSNCode",
+    "IntervalLimiter",
     "InvalidGSTINError",
     "InvalidPANError",
     "Jurisdiction",
     "NullCache",
+    "NullLimiter",
+    "PortalBlockedError",
+    "RateLimiter",
     "ReferenceNumber",
     "Registration",
+    "SingleFlight",
     "TTLCache",
     "TaxpayerCache",
     "TaxpayerDetails",

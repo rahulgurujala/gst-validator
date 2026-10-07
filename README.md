@@ -80,6 +80,7 @@ sees `datetime.date`, `None` and exceptions.
 | **Five free endpoints** | HSN/SAC search, the practitioner directory, codes, years and filing preferences need no captcha |
 | **Sync and async** | The same API with `await`, both strict-typed |
 | **Caches properly** | A lookup costs a human-solved captcha, so results persist between CLI runs |
+| **Paces itself** | Spaces requests, collapses duplicates and backs off when the portal blocks the address |
 
 ## Documentation
 
@@ -89,6 +90,7 @@ sees `datetime.date`, `None` and exceptions.
 | **[Library guide](docs/library.md)** | The Python API, layouts, caching, errors, and every field returned |
 | **[Recipes](docs/recipes.md)** | Whole tasks: checking a supplier spreadsheet, serving a web app, enriching a list |
 | **[Portal reference](docs/portal.md)** | What the portal actually returns, its quirks, and how each claim was verified |
+| **[Deployment](docs/deployment.md)** | Running it behind a web service without getting the address blocked |
 
 ## A taste of it
 

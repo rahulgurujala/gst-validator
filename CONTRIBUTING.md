@@ -27,6 +27,7 @@ src/gst_validator/
   bulk.py        validating and enriching many at once
   client.py      the sync and async HTTP clients
   cache.py       the in-memory and on-disk caches
+  limits.py      pacing, request coalescing and the circuit breaker
   cli.py         the command line, a thin shell over the rest
   exceptions.py  the one exception tree
   _parsing.py    shared normalisers for the portal's loose JSON
@@ -38,7 +39,7 @@ scripts/
 ```
 
 Tests mirror that: `test_gstin.py`, `test_taxpayer.py`, `test_search.py`,
-`test_client.py`, `test_cache.py`, `test_bulk.py`, `test_cli.py` and
+`test_client.py`, `test_cache.py`, `test_bulk.py`, `test_cli.py`, `test_limits.py` and
 `test_packaging.py`, with shared payloads and helpers in `tests/support.py`.
 
 ## Before opening a pull request
@@ -83,6 +84,13 @@ that version too.
   invented, and must stay that way.
 - **Keep it typed.** Both type checkers run in strict mode. Public functions
   are annotated; `Any` only at the JSON boundary, narrowed immediately.
+- **Never make the portal easier to hammer.** It blocks a whole address
+  that bursts, and that address belongs to whoever deployed this. Anything
+  new that reaches the network goes through the paced helpers, so the
+  limiter and the circuit breaker apply; a test counts direct uses of the
+  httpx client and fails when a new one appears. Features that would raise
+  the request rate need a reason, and defeating the captcha is not on the
+  table at all.
 - **Machine output stays plain.** The human table is rendered with rich, but
   `--json` and `--raw` are written with `print()` so pipes and `jq` get
   byte-exact output. Progress messages belong on stderr.

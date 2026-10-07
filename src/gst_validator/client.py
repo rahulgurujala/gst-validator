@@ -1,8 +1,5 @@
 """HTTP clients for the GST portal taxpayer search."""
 
-import asyncio
-import threading
-import time
 from types import TracebackType
 from typing import Any, ClassVar, Final, Self, cast
 
@@ -12,6 +9,14 @@ from ._parsing import as_mapping
 from .cache import DEFAULT_CACHE, TaxpayerCache
 from .exceptions import CaptchaError, TaxpayerLookupError
 from .gstin import validate_pan
+from .limits import (
+    DEFAULT_MIN_INTERVAL,
+    AsyncSingleFlight,
+    CircuitBreaker,
+    IntervalLimiter,
+    RateLimiter,
+    SingleFlight,
+)
 from .models import (
     GSTIN,
     Captcha,
@@ -42,49 +47,6 @@ _DEFAULT_USER_AGENT: Final = (
     "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
 _DEFAULT_RETRIES: Final = 2
-
-# The portal's firewall blocks a whole address after a burst of requests, and
-# it does not distinguish the captcha-free endpoints. One second between calls
-# is far below anything a person clicking the site would produce, and costs
-# nothing on the captcha-gated paths, where a human is solving an image
-# between requests anyway.
-_DEFAULT_MIN_INTERVAL: Final = 1.0
-
-
-class _Pacer:
-    """Keeps a minimum gap between requests on one client.
-
-    Deliberately per client rather than global: two clients are two sessions,
-    and a caller who wants them to share a budget can pass one in.
-    """
-
-    def __init__(self, min_interval: float) -> None:
-        if min_interval < 0:
-            raise ValueError("min_interval must not be negative")
-        self.min_interval: float = min_interval
-        self._last: float = 0.0
-        self._lock = threading.Lock()
-
-    def _delay(self) -> float:
-        """How long to wait, and claim the slot, under the lock."""
-        if self.min_interval <= 0:
-            return 0.0
-        with self._lock:
-            now = time.monotonic()
-            wait = max(0.0, self._last + self.min_interval - now)
-            self._last = now + wait
-            return wait
-
-    def wait(self) -> None:
-        delay = self._delay()
-        if delay:
-            time.sleep(delay)
-
-    async def wait_async(self) -> None:
-        delay = self._delay()
-        if delay:
-            await asyncio.sleep(delay)
-
 
 # Portal error codes worth explaining instead of echoing verbatim. Only codes
 # whose meaning has been confirmed belong here (SWEB_9000 from live responses,
@@ -397,18 +359,31 @@ class GSTClient(_BaseGSTClient):
         cache: TaxpayerCache | None = None,
         proxy: str | None = None,
         min_interval: float | None = None,
+        limiter: RateLimiter | None = None,
+        breaker: CircuitBreaker | None = None,
     ) -> None:
         """``proxy`` is passed to httpx, for an egress proxy or a debugging one.
 
-        ``min_interval`` is the smallest gap between requests, in seconds,
-        defaulting to :data:`_DEFAULT_MIN_INTERVAL`. The portal's firewall
-        blocks an address that bursts, so the default is a pace well under
-        what a person browsing the site produces. Set it to 0 only when
+        ``min_interval`` is the smallest gap between requests, in seconds. The
+        portal's firewall blocks an address that bursts, so it defaults to a
+        pace well under a person browsing the site. Set it to 0 only when
         nothing real is on the other end, as the tests do.
+
+        ``limiter`` replaces that with one of your own, which is what a
+        deployment of more than one process needs: a per-process limiter in
+        four workers is four times the rate you think you set. See
+        :mod:`gst_validator.limits`.
+
+        ``breaker`` stops requests going out once the portal has blocked this
+        address; sharing one between clients shares that knowledge.
         """
         self._cache: TaxpayerCache = DEFAULT_CACHE if cache is None else cache
         self._session_ready = False
-        self._pacer = _Pacer(_DEFAULT_MIN_INTERVAL if min_interval is None else min_interval)
+        self._limiter: RateLimiter = limiter or IntervalLimiter(
+            DEFAULT_MIN_INTERVAL if min_interval is None else min_interval
+        )
+        self._breaker = breaker or CircuitBreaker()
+        self._flight = SingleFlight()
         self._client = httpx.Client(
             base_url=self.BASE_URL,
             timeout=timeout,
@@ -418,6 +393,13 @@ class GSTClient(_BaseGSTClient):
             proxy=proxy,
         )
 
+    def _note(self, response: httpx.Response) -> None:
+        """Tell the breaker whether that request got through or was blocked."""
+        if _blocked(response.text):
+            self._breaker.record_block()
+        else:
+            self._breaker.record_success()
+
     def _paced_get(
         self,
         url: str,
@@ -425,9 +407,12 @@ class GSTClient(_BaseGSTClient):
         params: dict[str, str] | None = None,
         headers: dict[str, str] | None = None,
     ) -> httpx.Response:
-        """Every GET goes through here, so the pace cannot be bypassed."""
-        self._pacer.wait()
-        return self._client.get(url, params=params, headers=headers)
+        """Every GET passes here: breaker, then limiter, then block detection."""
+        self._breaker.before_request()
+        self._limiter.acquire()
+        response = self._client.get(url, params=params, headers=headers)
+        self._note(response)
+        return response
 
     def _paced_post(
         self,
@@ -436,9 +421,12 @@ class GSTClient(_BaseGSTClient):
         json: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
     ) -> httpx.Response:
-        """Every POST goes through here, so the pace cannot be bypassed."""
-        self._pacer.wait()
-        return self._client.post(url, json=json, headers=headers)
+        """Every POST passes here: breaker, then limiter, then block detection."""
+        self._breaker.before_request()
+        self._limiter.acquire()
+        response = self._client.post(url, json=json, headers=headers)
+        self._note(response)
+        return response
 
     def __enter__(self) -> Self:
         return self
@@ -700,17 +688,27 @@ class GSTClient(_BaseGSTClient):
         return self._as_temporary(response)
 
     def _get(self, path: str, gstin: GSTIN | str, **params: str) -> httpx.Response:
-        """GET a captcha-free endpoint, opening a portal session if needed."""
+        """GET a captcha-free endpoint, opening a portal session if needed.
+
+        Coalesced: callers asking for the same thing at the same moment share
+        one request, which is what keeps a busy web service off the
+        firewall's radar. A cache only helps once the first call has
+        returned.
+        """
         number = gstin if isinstance(gstin, GSTIN) else GSTIN.parse(gstin)
-        try:
-            self._ensure_session()
-            response = self._paced_get(
-                path, params={"gstin": number.value, **params}, headers=self._api_headers()
-            )
-            response.raise_for_status()
-        except httpx.HTTPError as error:
-            raise TaxpayerLookupError(f"request to {path} failed: {error}") from error
-        return response
+        query = {"gstin": number.value, **params}
+        key = f"{path}?{sorted(query.items())}"
+
+        def send() -> httpx.Response:
+            try:
+                self._ensure_session()
+                response = self._paced_get(path, params=query, headers=self._api_headers())
+                response.raise_for_status()
+            except httpx.HTTPError as error:
+                raise TaxpayerLookupError(f"request to {path} failed: {error}") from error
+            return response
+
+        return self._flight.run(key, send)
 
     def _ensure_session(self) -> None:
         """These endpoints need the cookies the search page hands out."""
@@ -731,11 +729,17 @@ class AsyncGSTClient(_BaseGSTClient):
         cache: TaxpayerCache | None = None,
         proxy: str | None = None,
         min_interval: float | None = None,
+        limiter: RateLimiter | None = None,
+        breaker: CircuitBreaker | None = None,
     ) -> None:
-        """As :class:`GSTClient`, including ``proxy`` and ``min_interval``."""
+        """As :class:`GSTClient`, including ``limiter`` and ``breaker``."""
         self._cache: TaxpayerCache = DEFAULT_CACHE if cache is None else cache
         self._session_ready = False
-        self._pacer = _Pacer(_DEFAULT_MIN_INTERVAL if min_interval is None else min_interval)
+        self._limiter: RateLimiter = limiter or IntervalLimiter(
+            DEFAULT_MIN_INTERVAL if min_interval is None else min_interval
+        )
+        self._breaker = breaker or CircuitBreaker()
+        self._flight = AsyncSingleFlight()
         self._client = httpx.AsyncClient(
             base_url=self.BASE_URL,
             timeout=timeout,
@@ -745,6 +749,13 @@ class AsyncGSTClient(_BaseGSTClient):
             proxy=proxy,
         )
 
+    def _note(self, response: httpx.Response) -> None:
+        """Tell the breaker whether that request got through or was blocked."""
+        if _blocked(response.text):
+            self._breaker.record_block()
+        else:
+            self._breaker.record_success()
+
     async def _paced_get(
         self,
         url: str,
@@ -752,9 +763,12 @@ class AsyncGSTClient(_BaseGSTClient):
         params: dict[str, str] | None = None,
         headers: dict[str, str] | None = None,
     ) -> httpx.Response:
-        """Every GET goes through here, so the pace cannot be bypassed."""
-        await self._pacer.wait_async()
-        return await self._client.get(url, params=params, headers=headers)
+        """Every GET passes here: breaker, then limiter, then block detection."""
+        self._breaker.before_request()
+        await self._limiter.acquire_async()
+        response = await self._client.get(url, params=params, headers=headers)
+        self._note(response)
+        return response
 
     async def _paced_post(
         self,
@@ -763,9 +777,12 @@ class AsyncGSTClient(_BaseGSTClient):
         json: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
     ) -> httpx.Response:
-        """Every POST goes through here, so the pace cannot be bypassed."""
-        await self._pacer.wait_async()
-        return await self._client.post(url, json=json, headers=headers)
+        """Every POST passes here: breaker, then limiter, then block detection."""
+        self._breaker.before_request()
+        await self._limiter.acquire_async()
+        response = await self._client.post(url, json=json, headers=headers)
+        self._note(response)
+        return response
 
     async def __aenter__(self) -> Self:
         return self
@@ -1026,17 +1043,21 @@ class AsyncGSTClient(_BaseGSTClient):
         return self._as_temporary(response)
 
     async def _get(self, path: str, gstin: GSTIN | str, **params: str) -> httpx.Response:
-        """GET a captcha-free endpoint, opening a portal session if needed."""
+        """GET a captcha-free endpoint, coalescing concurrent identical calls."""
         number = gstin if isinstance(gstin, GSTIN) else GSTIN.parse(gstin)
-        try:
-            await self._ensure_session()
-            response = await self._paced_get(
-                path, params={"gstin": number.value, **params}, headers=self._api_headers()
-            )
-            response.raise_for_status()
-        except httpx.HTTPError as error:
-            raise TaxpayerLookupError(f"request to {path} failed: {error}") from error
-        return response
+        query = {"gstin": number.value, **params}
+        key = f"{path}?{sorted(query.items())}"
+
+        async def send() -> httpx.Response:
+            try:
+                await self._ensure_session()
+                response = await self._paced_get(path, params=query, headers=self._api_headers())
+                response.raise_for_status()
+            except httpx.HTTPError as error:
+                raise TaxpayerLookupError(f"request to {path} failed: {error}") from error
+            return response
+
+        return await self._flight.run(key, send)
 
     async def _ensure_session(self) -> None:
         """These endpoints need the cookies the search page hands out."""

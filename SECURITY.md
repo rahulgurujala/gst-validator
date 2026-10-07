@@ -34,6 +34,12 @@ it. Worth knowing:
   number and email address alongside each one; this package does not carry
   either, and narrowing the search is required rather than optional. Do not
   use it to build a contact list.
+- **You can get your own address blocked.** The portal stops answering an
+  address that sends too fast, and it takes every endpoint down together.
+  The package paces itself, collapses duplicate in-flight requests and backs
+  off after a block, but those defaults are per process: a deployment of
+  several workers needs a shared limiter. See
+  [the deployment guide](docs/deployment.md).
 - **Credentials.** The package stores no credentials and needs none. Releases
   are published with PyPI Trusted Publishing, so no long-lived token exists in
   this repository.

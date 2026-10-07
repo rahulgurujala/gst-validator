@@ -14,6 +14,7 @@ from gst_validator import (
     Captcha,
     CaptchaError,
     GSTClient,
+    GSTValidatorError,
     InvalidGSTINError,
     InvalidPANError,
     TaxpayerDetails,
@@ -21,6 +22,7 @@ from gst_validator import (
     TaxpayerProfile,
     TTLCache,
 )
+from gst_validator.limits import CircuitBreaker, IntervalLimiter, RateLimiter
 
 from .support import (
     GOODS_PAYLOAD,
@@ -465,20 +467,40 @@ class TestFirewallBlock:
         return httpx.MockTransport(handler)
 
     def test_the_captcha_path_names_the_block(self) -> None:
+        """Either error is right, and both say the portal blocked us.
+
+        `fetch_captcha` opens the session first, so that request is the one
+        that meets the block and trips the breaker; the captcha request then
+        never leaves, which is the point of the breaker.
+        """
         with GSTClient(transport=self._transport()) as client:
-            with pytest.raises(CaptchaError, match="firewall rejected this client"):
+            with pytest.raises(GSTValidatorError, match=r"block|rejected"):
                 client.fetch_captcha()
 
     def test_a_json_endpoint_names_the_block(self) -> None:
         with GSTClient(transport=self._transport()) as client:
-            with pytest.raises(TaxpayerLookupError, match="firewall rejected this client"):
+            with pytest.raises(GSTValidatorError, match=r"block|rejected"):
                 client.fetch_goods_and_services(VALID_GSTIN)
 
-    def test_it_says_the_block_clears_on_its_own(self) -> None:
+    def test_the_message_explains_what_to_do(self) -> None:
         """The useful part: this is waited out, not worked around."""
-        with GSTClient(transport=self._transport()) as client:
+        with GSTClient(transport=self._transport(), breaker=CircuitBreaker(cool_off=0)) as client:
             with pytest.raises(CaptchaError, match="wait and retry"):
                 client.fetch_captcha()
+
+    def test_the_breaker_stops_the_second_request_in_one_call(self) -> None:
+        """Proof the block is detected on the session request, not later."""
+        sent = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal sent
+            sent += 1
+            return httpx.Response(200, text=self.BLOCK_PAGE, headers={"content-type": "text/html"})
+
+        with GSTClient(transport=httpx.MockTransport(handler)) as client:
+            with pytest.raises(GSTValidatorError):
+                client.fetch_captcha()
+        assert sent == 1, "the captcha request should not have left"
 
     def test_an_ordinary_html_body_is_still_reported_as_itself(self) -> None:
         """Only the firewall page gets the firewall message."""
@@ -499,38 +521,38 @@ class TestPacing:
     def test_the_default_is_a_second(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Asserted here because conftest zeroes it for every other test."""
         monkeypatch.undo()  # drop the autouse zeroing and read the real default
-        from gst_validator.client import (
-            _DEFAULT_MIN_INTERVAL,  # pyright: ignore[reportPrivateUsage]
-        )
+        from gst_validator.limits import DEFAULT_MIN_INTERVAL
 
-        assert _DEFAULT_MIN_INTERVAL == 1.0
+        assert DEFAULT_MIN_INTERVAL == 1.0
 
     def test_a_client_paces_itself_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("gst_validator.client._DEFAULT_MIN_INTERVAL", 1.0)
+        monkeypatch.setattr("gst_validator.client.DEFAULT_MIN_INTERVAL", 1.0)
         with GSTClient(transport=transport()) as client:
-            assert client._pacer.min_interval == 1.0  # pyright: ignore[reportPrivateUsage]
+            limiter = client._limiter  # pyright: ignore[reportPrivateUsage]
+        assert isinstance(limiter, IntervalLimiter)
+        assert limiter.min_interval == 1.0
 
     def test_the_gap_is_actually_waited(self) -> None:
-        from gst_validator.client import _Pacer  # pyright: ignore[reportPrivateUsage]
+        from gst_validator.limits import IntervalLimiter as _Pacer
 
         pacer = _Pacer(0.05)
         start = time.monotonic()
         for _ in range(3):
-            pacer.wait()
+            pacer.acquire()
         # first is free, the next two wait: at least two intervals
         assert time.monotonic() - start >= 0.09
 
     def test_zero_disables_it(self) -> None:
-        from gst_validator.client import _Pacer  # pyright: ignore[reportPrivateUsage]
+        from gst_validator.limits import IntervalLimiter as _Pacer
 
         pacer = _Pacer(0)
         start = time.monotonic()
         for _ in range(50):
-            pacer.wait()
+            pacer.acquire()
         assert time.monotonic() - start < 0.05
 
     def test_a_negative_interval_is_refused(self) -> None:
-        from gst_validator.client import _Pacer  # pyright: ignore[reportPrivateUsage]
+        from gst_validator.limits import IntervalLimiter as _Pacer
 
         with pytest.raises(ValueError, match="must not be negative"):
             _Pacer(-1)
@@ -552,8 +574,10 @@ class TestPacing:
             assert client is not None  # constructing with a proxy must not raise
 
     def test_the_async_client_paces_too(self) -> None:
-        async def go() -> float:
+        async def go() -> RateLimiter:
             async with AsyncGSTClient(transport=transport(), min_interval=0.25) as c:
-                return c._pacer.min_interval  # pyright: ignore[reportPrivateUsage]
+                return c._limiter  # pyright: ignore[reportPrivateUsage]
 
-        assert asyncio.run(go()) == 0.25
+        limiter = asyncio.run(go())
+        assert isinstance(limiter, IntervalLimiter)
+        assert limiter.min_interval == 0.25

@@ -370,25 +370,66 @@ concurrent lookups. The *cache* is the shared piece; clients stay cheap and
 short-lived. The cache stores `.raw`, so a cached entry survives a model
 upgrade.
 
-## 11. Pacing and proxies
+## 11. Staying inside what the portal tolerates
 
-The portal's firewall blocks an address that bursts, so every client leaves a
-second between requests by default:
+The portal blocks a whole address that sends too fast, so every client comes
+with three defences on by default:
 
 ```python
-GSTClient()  # one second between requests
+GSTClient()  # 1s between requests, coalescing, circuit breaker
 GSTClient(min_interval=2.0)  # slower
 GSTClient(min_interval=0)  # only when nothing real is listening
 GSTClient(proxy="http://proxy.internal:3128")
 ```
 
-The gap is per client and applies to every request it makes, including the
-captcha-free ones. A block raises with a message saying so, and clears on its
-own; it is on the address rather than the session, so retrying from a new
-client will not help.
+| | What it does |
+|---|---|
+| `IntervalLimiter` | spaces requests out; the default is one per second |
+| `SingleFlight` | concurrent identical captcha-free calls become one request |
+| `CircuitBreaker` | after a block, stops sending for five minutes |
 
-`proxy` goes straight to httpx, for a network that requires an egress proxy or
-for pointing at a debugging proxy.
+`proxy` is passed straight to httpx, for a network that requires an egress
+proxy or for pointing at a debugging one. It is not a way around a block: the
+block is on the address, and moving address to evade it is working around the
+control rather than respecting it.
+
+### More than one process
+
+The defaults are **per client object**, which is enough for a command line
+and not enough for a server. Four workers each pacing at one per second emit
+four per second. Implement `RateLimiter` over something shared:
+
+```python
+from gst_validator import CircuitBreaker, GSTClient, RateLimiter
+
+
+class RedisLimiter:
+    def acquire(self) -> None: ...
+    async def acquire_async(self) -> None: ...
+
+
+BREAKER = CircuitBreaker(cool_off=300)
+client = GSTClient(limiter=RedisLimiter(redis), breaker=BREAKER)
+```
+
+Sharing the breaker means one worker discovering the block backs all of them
+off together.
+
+### When you are blocked
+
+`PortalBlockedError` is raised *instead of sending*, so you can tell it from
+the portal rejecting a request you actually made:
+
+```python
+from gst_validator import PortalBlockedError
+
+try:
+    codes = client.fetch_goods_and_services(gstin)
+except PortalBlockedError as error:
+    ...  # serve from cache, or 503 with Retry-After=error.seconds_remaining
+```
+
+[The deployment guide](deployment.md) covers this properly for a web service.
 
 ## 12. Error handling
 
