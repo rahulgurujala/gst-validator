@@ -1,5 +1,8 @@
 """HTTP clients for the GST portal taxpayer search."""
 
+import asyncio
+import threading
+import time
 from types import TracebackType
 from typing import Any, ClassVar, Final, Self, cast
 
@@ -39,6 +42,49 @@ _DEFAULT_USER_AGENT: Final = (
     "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
 _DEFAULT_RETRIES: Final = 2
+
+# The portal's firewall blocks a whole address after a burst of requests, and
+# it does not distinguish the captcha-free endpoints. One second between calls
+# is far below anything a person clicking the site would produce, and costs
+# nothing on the captcha-gated paths, where a human is solving an image
+# between requests anyway.
+_DEFAULT_MIN_INTERVAL: Final = 1.0
+
+
+class _Pacer:
+    """Keeps a minimum gap between requests on one client.
+
+    Deliberately per client rather than global: two clients are two sessions,
+    and a caller who wants them to share a budget can pass one in.
+    """
+
+    def __init__(self, min_interval: float) -> None:
+        if min_interval < 0:
+            raise ValueError("min_interval must not be negative")
+        self.min_interval: float = min_interval
+        self._last: float = 0.0
+        self._lock = threading.Lock()
+
+    def _delay(self) -> float:
+        """How long to wait, and claim the slot, under the lock."""
+        if self.min_interval <= 0:
+            return 0.0
+        with self._lock:
+            now = time.monotonic()
+            wait = max(0.0, self._last + self.min_interval - now)
+            self._last = now + wait
+            return wait
+
+    def wait(self) -> None:
+        delay = self._delay()
+        if delay:
+            time.sleep(delay)
+
+    async def wait_async(self) -> None:
+        delay = self._delay()
+        if delay:
+            await asyncio.sleep(delay)
+
 
 # Portal error codes worth explaining instead of echoing verbatim. Only codes
 # whose meaning has been confirmed belong here (SWEB_9000 from live responses,
@@ -349,16 +395,50 @@ class GSTClient(_BaseGSTClient):
         user_agent: str = _DEFAULT_USER_AGENT,
         transport: httpx.BaseTransport | None = None,
         cache: TaxpayerCache | None = None,
+        proxy: str | None = None,
+        min_interval: float | None = None,
     ) -> None:
+        """``proxy`` is passed to httpx, for an egress proxy or a debugging one.
+
+        ``min_interval`` is the smallest gap between requests, in seconds,
+        defaulting to :data:`_DEFAULT_MIN_INTERVAL`. The portal's firewall
+        blocks an address that bursts, so the default is a pace well under
+        what a person browsing the site produces. Set it to 0 only when
+        nothing real is on the other end, as the tests do.
+        """
         self._cache: TaxpayerCache = DEFAULT_CACHE if cache is None else cache
         self._session_ready = False
+        self._pacer = _Pacer(_DEFAULT_MIN_INTERVAL if min_interval is None else min_interval)
         self._client = httpx.Client(
             base_url=self.BASE_URL,
             timeout=timeout,
             follow_redirects=True,
             headers=self._base_headers(user_agent),
             transport=transport or httpx.HTTPTransport(retries=_DEFAULT_RETRIES),
+            proxy=proxy,
         )
+
+    def _paced_get(
+        self,
+        url: str,
+        *,
+        params: dict[str, str] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> httpx.Response:
+        """Every GET goes through here, so the pace cannot be bypassed."""
+        self._pacer.wait()
+        return self._client.get(url, params=params, headers=headers)
+
+    def _paced_post(
+        self,
+        url: str,
+        *,
+        json: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> httpx.Response:
+        """Every POST goes through here, so the pace cannot be bypassed."""
+        self._pacer.wait()
+        return self._client.post(url, json=json, headers=headers)
 
     def __enter__(self) -> Self:
         return self
@@ -378,9 +458,9 @@ class GSTClient(_BaseGSTClient):
     def fetch_captcha(self) -> Captcha:
         """Open a portal session and download its captcha image."""
         try:
-            self._client.get(self.SEARCH_PATH).raise_for_status()
+            self._paced_get(self.SEARCH_PATH).raise_for_status()
             self._session_ready = True
-            response = self._client.get(self.CAPTCHA_PATH, headers=self._captcha_headers())
+            response = self._paced_get(self.CAPTCHA_PATH, headers=self._captcha_headers())
             response.raise_for_status()
         except httpx.HTTPError as error:
             raise CaptchaError(f"could not fetch captcha: {error}") from error
@@ -404,7 +484,7 @@ class GSTClient(_BaseGSTClient):
             return hit
         payload = self._request_payload(number, captcha)
         try:
-            response = self._client.post(
+            response = self._paced_post(
                 self.DETAILS_PATH, json=payload, headers=self._details_headers()
             )
             response.raise_for_status()
@@ -450,7 +530,7 @@ class GSTClient(_BaseGSTClient):
         """
         payload = self._pan_payload(pan, captcha)
         try:
-            response = self._client.post(
+            response = self._paced_post(
                 self.REGISTRATIONS_PATH, json=payload, headers=self._pan_headers()
             )
             response.raise_for_status()
@@ -476,7 +556,7 @@ class GSTClient(_BaseGSTClient):
         selected = "byCode" if by == "code" else "byDesc"
         category = "null" if by == "code" else ("P" if goods else "S")
         try:
-            response = self._client.get(
+            response = self._paced_get(
                 self.HSN_URL,
                 params={"inputText": text, "selectedType": selected, "category": category},
                 headers=self._api_headers(),
@@ -524,7 +604,7 @@ class GSTClient(_BaseGSTClient):
                 "pinCd": pincode or "",
             }
         try:
-            response = self._client.post(
+            response = self._paced_post(
                 self.PRACTITIONER_PATH, json=payload, headers=self._api_headers()
             )
             response.raise_for_status()
@@ -548,7 +628,7 @@ class GSTClient(_BaseGSTClient):
             "fy": financial_year,
         }
         try:
-            response = self._client.post(
+            response = self._paced_post(
                 self.COMPOSITION_PATH, json=payload, headers=self._details_headers()
             )
             response.raise_for_status()
@@ -564,7 +644,7 @@ class GSTClient(_BaseGSTClient):
         if not text:
             raise TaxpayerLookupError("captcha text must not be empty")
         try:
-            response = self._client.get(
+            response = self._paced_get(
                 self.ARN_PATH,
                 params={"arn": arn.strip().upper(), "captcha": text},
                 headers=self._api_headers(),
@@ -585,7 +665,7 @@ class GSTClient(_BaseGSTClient):
             raise TaxpayerLookupError("captcha text must not be empty")
         cleaned = reference.strip().upper()
         try:
-            response = self._client.post(
+            response = self._paced_post(
                 self.RFN_URL,
                 json={"refId": cleaned, "captcha": text},
                 headers=self._details_headers(),
@@ -609,7 +689,7 @@ class GSTClient(_BaseGSTClient):
             "captcha": text,
         }
         try:
-            response = self._client.post(
+            response = self._paced_post(
                 self.TEMPORARY_PATH, json=payload, headers=self._details_headers()
             )
             response.raise_for_status()
@@ -624,7 +704,7 @@ class GSTClient(_BaseGSTClient):
         number = gstin if isinstance(gstin, GSTIN) else GSTIN.parse(gstin)
         try:
             self._ensure_session()
-            response = self._client.get(
+            response = self._paced_get(
                 path, params={"gstin": number.value, **params}, headers=self._api_headers()
             )
             response.raise_for_status()
@@ -635,7 +715,7 @@ class GSTClient(_BaseGSTClient):
     def _ensure_session(self) -> None:
         """These endpoints need the cookies the search page hands out."""
         if not self._session_ready:
-            self._client.get(self.SEARCH_PATH).raise_for_status()
+            self._paced_get(self.SEARCH_PATH).raise_for_status()
             self._session_ready = True
 
 
@@ -649,16 +729,43 @@ class AsyncGSTClient(_BaseGSTClient):
         user_agent: str = _DEFAULT_USER_AGENT,
         transport: httpx.AsyncBaseTransport | None = None,
         cache: TaxpayerCache | None = None,
+        proxy: str | None = None,
+        min_interval: float | None = None,
     ) -> None:
+        """As :class:`GSTClient`, including ``proxy`` and ``min_interval``."""
         self._cache: TaxpayerCache = DEFAULT_CACHE if cache is None else cache
         self._session_ready = False
+        self._pacer = _Pacer(_DEFAULT_MIN_INTERVAL if min_interval is None else min_interval)
         self._client = httpx.AsyncClient(
             base_url=self.BASE_URL,
             timeout=timeout,
             follow_redirects=True,
             headers=self._base_headers(user_agent),
             transport=transport or httpx.AsyncHTTPTransport(retries=_DEFAULT_RETRIES),
+            proxy=proxy,
         )
+
+    async def _paced_get(
+        self,
+        url: str,
+        *,
+        params: dict[str, str] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> httpx.Response:
+        """Every GET goes through here, so the pace cannot be bypassed."""
+        await self._pacer.wait_async()
+        return await self._client.get(url, params=params, headers=headers)
+
+    async def _paced_post(
+        self,
+        url: str,
+        *,
+        json: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> httpx.Response:
+        """Every POST goes through here, so the pace cannot be bypassed."""
+        await self._pacer.wait_async()
+        return await self._client.post(url, json=json, headers=headers)
 
     async def __aenter__(self) -> Self:
         return self
@@ -678,9 +785,9 @@ class AsyncGSTClient(_BaseGSTClient):
     async def fetch_captcha(self) -> Captcha:
         """Open a portal session and download its captcha image."""
         try:
-            (await self._client.get(self.SEARCH_PATH)).raise_for_status()
+            (await self._paced_get(self.SEARCH_PATH)).raise_for_status()
             self._session_ready = True
-            response = await self._client.get(self.CAPTCHA_PATH, headers=self._captcha_headers())
+            response = await self._paced_get(self.CAPTCHA_PATH, headers=self._captcha_headers())
             response.raise_for_status()
         except httpx.HTTPError as error:
             raise CaptchaError(f"could not fetch captcha: {error}") from error
@@ -704,7 +811,7 @@ class AsyncGSTClient(_BaseGSTClient):
             return hit
         payload = self._request_payload(number, captcha)
         try:
-            response = await self._client.post(
+            response = await self._paced_post(
                 self.DETAILS_PATH, json=payload, headers=self._details_headers()
             )
             response.raise_for_status()
@@ -749,7 +856,7 @@ class AsyncGSTClient(_BaseGSTClient):
         """
         payload = self._pan_payload(pan, captcha)
         try:
-            response = await self._client.post(
+            response = await self._paced_post(
                 self.REGISTRATIONS_PATH, json=payload, headers=self._pan_headers()
             )
             response.raise_for_status()
@@ -775,7 +882,7 @@ class AsyncGSTClient(_BaseGSTClient):
         selected = "byCode" if by == "code" else "byDesc"
         category = "null" if by == "code" else ("P" if goods else "S")
         try:
-            response = await self._client.get(
+            response = await self._paced_get(
                 self.HSN_URL,
                 params={"inputText": text, "selectedType": selected, "category": category},
                 headers=self._api_headers(),
@@ -823,7 +930,7 @@ class AsyncGSTClient(_BaseGSTClient):
                 "pinCd": pincode or "",
             }
         try:
-            response = await self._client.post(
+            response = await self._paced_post(
                 self.PRACTITIONER_PATH, json=payload, headers=self._api_headers()
             )
             response.raise_for_status()
@@ -847,7 +954,7 @@ class AsyncGSTClient(_BaseGSTClient):
             "fy": financial_year,
         }
         try:
-            response = await self._client.post(
+            response = await self._paced_post(
                 self.COMPOSITION_PATH, json=payload, headers=self._details_headers()
             )
             response.raise_for_status()
@@ -863,7 +970,7 @@ class AsyncGSTClient(_BaseGSTClient):
         if not text:
             raise TaxpayerLookupError("captcha text must not be empty")
         try:
-            response = await self._client.get(
+            response = await self._paced_get(
                 self.ARN_PATH,
                 params={"arn": arn.strip().upper(), "captcha": text},
                 headers=self._api_headers(),
@@ -884,7 +991,7 @@ class AsyncGSTClient(_BaseGSTClient):
             raise TaxpayerLookupError("captcha text must not be empty")
         cleaned = reference.strip().upper()
         try:
-            response = await self._client.post(
+            response = await self._paced_post(
                 self.RFN_URL,
                 json={"refId": cleaned, "captcha": text},
                 headers=self._details_headers(),
@@ -908,7 +1015,7 @@ class AsyncGSTClient(_BaseGSTClient):
             "captcha": text,
         }
         try:
-            response = await self._client.post(
+            response = await self._paced_post(
                 self.TEMPORARY_PATH, json=payload, headers=self._details_headers()
             )
             response.raise_for_status()
@@ -923,7 +1030,7 @@ class AsyncGSTClient(_BaseGSTClient):
         number = gstin if isinstance(gstin, GSTIN) else GSTIN.parse(gstin)
         try:
             await self._ensure_session()
-            response = await self._client.get(
+            response = await self._paced_get(
                 path, params={"gstin": number.value, **params}, headers=self._api_headers()
             )
             response.raise_for_status()
@@ -934,5 +1041,5 @@ class AsyncGSTClient(_BaseGSTClient):
     async def _ensure_session(self) -> None:
         """These endpoints need the cookies the search page hands out."""
         if not self._session_ready:
-            (await self._client.get(self.SEARCH_PATH)).raise_for_status()
+            (await self._paced_get(self.SEARCH_PATH)).raise_for_status()
             self._session_ready = True

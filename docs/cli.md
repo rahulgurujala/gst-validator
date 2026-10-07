@@ -314,6 +314,8 @@ Also runnable as a module: `python -m gst_validator 27AAACR5055K1Z7`.
 | `--captcha-path PATH` | Where to write the captcha image |
 | `--captcha-base64` | Print the captcha as a `data:` URI instead of a file |
 | `--keep-captcha` | Keep the captcha image after it has been solved |
+| `--proxy URL` | Send requests through a proxy, e.g. an egress or debugging one |
+| `--min-interval SECONDS` | Smallest gap between requests (default 1s) |
 | `--no-color` | Plain text, no styling (also honours `NO_COLOR`) |
 | `--version` | Print the version |
 
@@ -348,6 +350,40 @@ rest belong to one mode: `--offline`, `--column`, `--enrich`, `--details-only`
 and `--refresh` to a plain GSTIN lookup, `--by` and `--services` to `--hsn`,
 `--enrolment` and `--pincode` to `--practitioner`, `--year` and `--opted-out`
 to `--composition`, and `--state` to either of the last two.
+
+## Pacing, and the firewall
+
+The portal sits behind a firewall that blocks a whole address after a burst of
+requests, and it does not spare the captcha-free endpoints. So every client
+leaves **one second between requests** by default:
+
+```bash
+gst-validator --hsn - --min-interval 2 < codes.txt   # slower still
+gst-validator --hsn 3926 --min-interval 0            # only against a fake portal
+```
+
+This costs nothing on the captcha-gated searches, where a person is solving an
+image between calls anyway. It does pace a long `--hsn` batch, which is the
+point.
+
+If you are blocked, you will see:
+
+```
+the portal's firewall rejected this client, which it does after a burst of
+requests from one address; it clears on its own, so wait and retry
+```
+
+**Wait it out.** The block is on the address, not the session, so a new client
+will not help. Changing address to get around it is not what `--proxy` is for.
+
+### `--proxy`
+
+```bash
+gst-validator --hsn 3926 --proxy http://proxy.internal:3128
+```
+
+For the ordinary reasons: a network that requires an egress proxy, or pointing
+at something like mitmproxy while debugging. It is passed straight to httpx.
 
 ## Exit codes
 

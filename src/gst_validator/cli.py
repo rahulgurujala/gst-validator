@@ -251,6 +251,19 @@ def _parser() -> argparse.ArgumentParser:
         help="keep the captcha image on disk after it has been solved",
     )
     parser.add_argument(
+        "--proxy",
+        metavar="URL",
+        default=None,
+        help="send requests through this proxy, e.g. an egress or debugging one",
+    )
+    parser.add_argument(
+        "--min-interval",
+        metavar="SECONDS",
+        type=float,
+        default=None,
+        help="smallest gap between requests (default: 1s; the portal blocks bursts)",
+    )
+    parser.add_argument(
         "--no-color",
         action="store_true",
         help="disable colour and styling (also honours NO_COLOR)",
@@ -486,7 +499,7 @@ def _lookup_many(gstins: Sequence[GSTIN], args: argparse.Namespace) -> list[Taxp
     A row that fails is reported and the run carries on.
     """
     profiles: list[TaxpayerProfile] = []
-    with GSTClient(cache=_cache_for(args)) as client:
+    with GSTClient(cache=_cache_for(args), **_transport_options(args)) as client:
         for index, gstin in enumerate(gstins, start=1):
             if len(gstins) > 1:
                 err.print(
@@ -609,7 +622,7 @@ def _run_pan(args: argparse.Namespace, fmt: str) -> int:
     # NullCache on purpose: the cache stores taxpayer details, and a PAN
     # result is a different shape entirely, so nothing here would ever read or
     # write it. Handing over the disk cache would only imply otherwise.
-    with GSTClient(cache=NullCache()) as client:
+    with GSTClient(cache=NullCache(), **_transport_options(args)) as client:
         try:
             with _solved_captcha(client, args, pan) as solved:
                 rows = client.fetch_registrations_by_pan(pan, solved)
@@ -676,7 +689,7 @@ def _run_hsn(args: argparse.Namespace, fmt: str) -> int:
         err.print(Text("no search text given", style="err"))
         return 2
     found: list[HSNCode] = []
-    with GSTClient(cache=NullCache()) as client:
+    with GSTClient(cache=NullCache(), **_transport_options(args)) as client:
         try:
             for term in terms:
                 found.extend(client.search_hsn_codes(term, by=args.by, goods=not args.services))
@@ -702,7 +715,7 @@ def _run_practitioner(args: argparse.Namespace, fmt: str) -> int:
             )
         )
         return 2
-    with GSTClient(cache=NullCache()) as client:
+    with GSTClient(cache=NullCache(), **_transport_options(args)) as client:
         try:
             rows = client.search_practitioners(
                 state_code=args.state, pincode=args.pincode, enrolment_number=args.enrolment
@@ -726,7 +739,7 @@ def _run_composition(args: argparse.Namespace, fmt: str) -> int:
     if not (args.state and args.year):
         err.print(Text("--composition needs both --state and --year", style="err"))
         return 2
-    with GSTClient(cache=NullCache()) as client:
+    with GSTClient(cache=NullCache(), **_transport_options(args)) as client:
         try:
             with _solved_captcha(client, args, f"composition-{args.state}") as solved:
                 rows = client.search_composition_taxpayers(
@@ -748,7 +761,7 @@ def _run_composition(args: argparse.Namespace, fmt: str) -> int:
 
 def _run_single(args: argparse.Namespace, fmt: str) -> int:
     """The three one-answer searches: ARN, RFN and temporary id. One captcha each."""
-    with GSTClient(cache=NullCache()) as client:
+    with GSTClient(cache=NullCache(), **_transport_options(args)) as client:
         try:
             with _solved_captcha(client, args, "lookup") as solved:
                 result: object
@@ -831,6 +844,14 @@ def _dump(payload: object, *, compact: bool) -> None:
     print(json.dumps(payload, indent=None if compact else 2, ensure_ascii=False))
 
 
+def _transport_options(args: argparse.Namespace) -> dict[str, Any]:
+    """Connection settings every client the command line builds should share."""
+    options: dict[str, Any] = {"proxy": args.proxy}
+    if args.min_interval is not None:
+        options["min_interval"] = args.min_interval
+    return options
+
+
 def _cache_for(args: argparse.Namespace) -> TaxpayerCache:
     """A lookup costs a captcha, so results persist between runs by default."""
     return NullCache() if args.no_cache else DiskCache()
@@ -868,7 +889,7 @@ def _run_bulk(args: argparse.Namespace, fmt: str) -> int:
     rows: Iterable[ValidationResult] = validate_many(values, extras=extras or None)
     try:
         if args.enrich:
-            with GSTClient(cache=_cache_for(args)) as client:
+            with GSTClient(cache=_cache_for(args), **_transport_options(args)) as client:
                 rows = list(enrich_many(rows, client=client))
         else:
             rows = list(rows)

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 from collections.abc import Callable, Coroutine
 from pathlib import Path
 
@@ -490,3 +491,69 @@ class TestFirewallBlock:
         with GSTClient(transport=httpx.MockTransport(handler)) as client:
             with pytest.raises(CaptchaError, match="expected an image"):
                 client.fetch_captcha()
+
+
+class TestPacing:
+    """Requests are spaced by default, because the firewall blocks bursts."""
+
+    def test_the_default_is_a_second(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Asserted here because conftest zeroes it for every other test."""
+        monkeypatch.undo()  # drop the autouse zeroing and read the real default
+        from gst_validator.client import (
+            _DEFAULT_MIN_INTERVAL,  # pyright: ignore[reportPrivateUsage]
+        )
+
+        assert _DEFAULT_MIN_INTERVAL == 1.0
+
+    def test_a_client_paces_itself_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr("gst_validator.client._DEFAULT_MIN_INTERVAL", 1.0)
+        with GSTClient(transport=transport()) as client:
+            assert client._pacer.min_interval == 1.0  # pyright: ignore[reportPrivateUsage]
+
+    def test_the_gap_is_actually_waited(self) -> None:
+        from gst_validator.client import _Pacer  # pyright: ignore[reportPrivateUsage]
+
+        pacer = _Pacer(0.05)
+        start = time.monotonic()
+        for _ in range(3):
+            pacer.wait()
+        # first is free, the next two wait: at least two intervals
+        assert time.monotonic() - start >= 0.09
+
+    def test_zero_disables_it(self) -> None:
+        from gst_validator.client import _Pacer  # pyright: ignore[reportPrivateUsage]
+
+        pacer = _Pacer(0)
+        start = time.monotonic()
+        for _ in range(50):
+            pacer.wait()
+        assert time.monotonic() - start < 0.05
+
+    def test_a_negative_interval_is_refused(self) -> None:
+        from gst_validator.client import _Pacer  # pyright: ignore[reportPrivateUsage]
+
+        with pytest.raises(ValueError, match="must not be negative"):
+            _Pacer(-1)
+
+    def test_every_request_goes_through_the_pacer(self) -> None:
+        """A call site that used self._client directly would skip the pace."""
+        import inspect
+
+        from gst_validator import client as module
+
+        source = inspect.getsource(module)
+        direct = source.count("self._client.get(") + source.count("self._client.post(")
+        # only the two paced helpers on each client may touch the raw client
+        assert direct == 4
+
+    def test_a_proxy_is_passed_to_httpx(self) -> None:
+        """Plain passthrough: an egress proxy, or one for debugging."""
+        with GSTClient(transport=transport(), proxy="http://127.0.0.1:8080") as client:
+            assert client is not None  # constructing with a proxy must not raise
+
+    def test_the_async_client_paces_too(self) -> None:
+        async def go() -> float:
+            async with AsyncGSTClient(transport=transport(), min_interval=0.25) as c:
+                return c._pacer.min_interval  # pyright: ignore[reportPrivateUsage]
+
+        assert asyncio.run(go()) == 0.25

@@ -370,7 +370,27 @@ concurrent lookups. The *cache* is the shared piece; clients stay cheap and
 short-lived. The cache stores `.raw`, so a cached entry survives a model
 upgrade.
 
-## 11. Error handling
+## 11. Pacing and proxies
+
+The portal's firewall blocks an address that bursts, so every client leaves a
+second between requests by default:
+
+```python
+GSTClient()  # one second between requests
+GSTClient(min_interval=2.0)  # slower
+GSTClient(min_interval=0)  # only when nothing real is listening
+GSTClient(proxy="http://proxy.internal:3128")
+```
+
+The gap is per client and applies to every request it makes, including the
+captcha-free ones. A block raises with a message saying so, and clears on its
+own; it is on the address rather than the session, so retrying from a new
+client will not help.
+
+`proxy` goes straight to httpx, for a network that requires an egress proxy or
+for pointing at a debugging proxy.
+
+## 12. Error handling
 
 ```
 GSTValidatorError
