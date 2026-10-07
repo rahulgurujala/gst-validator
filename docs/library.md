@@ -439,16 +439,28 @@ GSTValidatorError
 ├── InvalidGSTINError   (also a ValueError)  .value, .reason
 ├── InvalidPANError     (also a ValueError)  .value, .reason
 ├── CaptchaError                             captcha could not be fetched
+├── PortalBlockedError                       .seconds_remaining, nothing was sent
 └── TaxpayerLookupError                      .code = the portal's errorCode
 ```
 
 ```python
-from gst_validator import CaptchaError, GSTValidatorError, InvalidGSTINError, TaxpayerLookupError
+from gst_validator import (
+    CaptchaError,
+    GSTValidatorError,
+    InvalidGSTINError,
+    PortalBlockedError,
+    TaxpayerLookupError,
+)
 
 try:
     profile = client.fetch_profile(gstin, solved)
 except InvalidGSTINError:
     ...  # bad input, never hit the network
+except PortalBlockedError as error:
+    # Nothing was sent: the portal has blocked this address and the client
+    # is waiting it out. Catch this before TaxpayerLookupError, which is
+    # about a request that did go out.
+    ...  # serve from cache, or 503 with Retry-After=error.seconds_remaining
 except CaptchaError:
     ...  # portal did not hand out an image
 except TaxpayerLookupError as error:
@@ -457,6 +469,10 @@ except TaxpayerLookupError as error:
 except GSTValidatorError:
     ...  # catch-all for this package
 ```
+
+`PortalBlockedError` is the odd one out: it is raised *instead of* sending,
+so it means the client already knows the address is blocked. Everything else
+means a request went out and came back wrong.
 
 The portal answers rejections with HTTP 200 and a body carrying an
 `errorCode`, so the *absence* of `gstin` in the body, not the status code,
@@ -500,14 +516,23 @@ Each is a frozen dataclass with an `unmapped` dict and no `raw`, for the same
 reason as `Registration`: nothing caches them, and every key the portal sends
 has a field.
 
-| Type | From | Notable |
+Every one also carries `unmapped`, so a new portal field is visible rather
+than lost.
+
+| Type | From | Attributes |
 |---|---|---|
-| `HSNCode` | `search_hsn_codes()` | `code`, `description`, `is_service`, `chapter` |
-| `CompositionTaxpayer` | `search_composition_taxpayers()` | `gstin`, `number`, `legal_name`, `opted_in_on`, `opted_out_on` |
-| `ApplicationStatus` | `track_application()` | `arn`, `status_description`, `form`, `submitted_on` |
-| `ReferenceNumber` | `verify_reference_number()` | `is_genuine`, `document_type`, `issued_on` |
-| `GSTPractitioner` | `search_practitioners()` | `enrolment_number`, `name`, `pincode`, `is_active` |
-| `TemporaryRegistration` | `search_temporary_registration()` | `temporary_id`, `legal_name`, `status` |
+| `HSNCode` | `search_hsn_codes()` | `code`, `description`; derived: `is_service`, `chapter` |
+| `CompositionTaxpayer` | `search_composition_taxpayers()` | `gstin`, `legal_name`, `opted_in_on`, `opted_out_on`; derived: `number`, `state_code` |
+| `ApplicationStatus` | `track_application()` | `arn`, `status`, `status_description`, `form`, `form_description`, `submitted_on`, `updated_on` |
+| `ReferenceNumber` | `verify_reference_number()` | `reference`, `is_genuine`, `document_type`, `issued_on`, `office` |
+| `GSTPractitioner` | `search_practitioners()` | `enrolment_number`, `name`, `state_code`, `district_code`, `pincode`, `category`, `address`, `status`; derived: `is_active` |
+| `TemporaryRegistration` | `search_temporary_registration()` | `temporary_id`, `legal_name`, `state_code`, `status`, `registered_on` |
+
+`ApplicationStatus`, `ReferenceNumber` and `TemporaryRegistration` are the
+three whose **success shape has never been observed**: the requests are
+captured from the portal, the response fields are inferred from its own
+screens. Treat their attribute names as provisional until someone confirms
+them against a real response. See [the portal reference](portal.md).
 
 `GSTPractitioner` describes a named private individual. The portal also
 returns a personal phone number and email address for each one; this package

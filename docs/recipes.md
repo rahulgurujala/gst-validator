@@ -201,6 +201,12 @@ taxpayer is registered for but sometimes with a thin description.
 
 ## Serve it from a web app
 
+> A bare `GSTClient()` paces only itself, which is fine here and **not enough
+> for a real deployment**: several workers each pace separately, so the
+> service emits several times the rate you think it does. Before this goes
+> live, read [the deployment guide](deployment.md), which covers the shared
+> limiter, breaker and cache, and has the whole app written out.
+
 The captcha is bound to the session that fetched it, so keep one client per
 pending lookup:
 
@@ -241,6 +247,22 @@ def lookup(session_id: str, gstin: str, captcha: str) -> dict[str, object]:
 
 `captcha.data_uri` goes straight into `<img src="...">`. Give `pending` an
 expiry: an abandoned entry holds a connection pool open.
+
+Handle `PortalBlockedError` separately from the rest. It means nothing was
+sent, so a 503 with `Retry-After` is honest where a 502 would not be:
+
+```python
+from gst_validator import PortalBlockedError
+
+try:
+    return client.fetch_profile(gstin, captcha).as_dict()
+except PortalBlockedError as error:
+    raise HTTPException(
+        503,
+        "the portal is refusing requests from this service",
+        headers={"Retry-After": str(int(error.seconds_remaining))},
+    ) from error
+```
 
 ## Check whether a notice is genuine
 

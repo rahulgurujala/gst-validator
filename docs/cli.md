@@ -395,7 +395,7 @@ at something like mitmproxy while debugging. It is passed straight to httpx.
 | Code | Meaning |
 |---|---|
 | `0` | Everything succeeded |
-| `1` | A lookup failed: wrong captcha, portal error, network |
+| `1` | A lookup failed: wrong captcha, portal error, network, or the firewall blocking this address |
 | `2` | At least one input was not a valid GSTIN |
 | `130` | Aborted with Ctrl-C, or stdin closed at a prompt |
 | `141` | The reader closed the pipe, as `head` does. Not an error |

@@ -32,6 +32,7 @@ src/gst_validator/
   exceptions.py  the one exception tree
   _parsing.py    shared normalisers for the portal's loose JSON
   models.py      re-exports the types, so older imports keep working
+  __main__.py    so `python -m gst_validator` works
 
 scripts/
   check_state_master.py  diffs the state table against the portal's own
