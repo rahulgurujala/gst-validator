@@ -441,3 +441,52 @@ class TestPanSearch:
 
         with pytest.raises(InvalidPANError):
             asyncio.run(go())
+
+
+class TestFirewallBlock:
+    """The portal's firewall answers a blocked client with HTML and HTTP 200.
+
+    Unrecognised, that surfaced as "expected an image, got 'text/html'" on the
+    captcha and as a decode error elsewhere, both of which read like a bug in
+    the caller's own code rather than a block that clears by waiting.
+    """
+
+    BLOCK_PAGE = (
+        "<html><head><title>Request Rejected</title></head><body>The requested "
+        "URL was rejected. Please consult with your administrator.<br><br>Your "
+        "support ID is: &lt;9212737809405083695&gt;</body></html>"
+    )
+
+    def _transport(self) -> httpx.MockTransport:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, text=self.BLOCK_PAGE, headers={"content-type": "text/html"})
+
+        return httpx.MockTransport(handler)
+
+    def test_the_captcha_path_names_the_block(self) -> None:
+        with GSTClient(transport=self._transport()) as client:
+            with pytest.raises(CaptchaError, match="firewall rejected this client"):
+                client.fetch_captcha()
+
+    def test_a_json_endpoint_names_the_block(self) -> None:
+        with GSTClient(transport=self._transport()) as client:
+            with pytest.raises(TaxpayerLookupError, match="firewall rejected this client"):
+                client.fetch_goods_and_services(VALID_GSTIN)
+
+    def test_it_says_the_block_clears_on_its_own(self) -> None:
+        """The useful part: this is waited out, not worked around."""
+        with GSTClient(transport=self._transport()) as client:
+            with pytest.raises(CaptchaError, match="wait and retry"):
+                client.fetch_captcha()
+
+    def test_an_ordinary_html_body_is_still_reported_as_itself(self) -> None:
+        """Only the firewall page gets the firewall message."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200, text="<html>maintenance</html>", headers={"content-type": "text/html"}
+            )
+
+        with GSTClient(transport=httpx.MockTransport(handler)) as client:
+            with pytest.raises(CaptchaError, match="expected an image"):
+                client.fetch_captcha()

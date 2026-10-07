@@ -124,6 +124,8 @@ class _BaseGSTClient:
     def _as_captcha(response: httpx.Response) -> Captcha:
         media_type = response.headers.get("content-type", "image/png").split(";")[0]
         if not media_type.startswith("image/"):
+            if _blocked(response.text):
+                raise CaptchaError(_BLOCKED_MESSAGE)
             raise CaptchaError(f"expected an image, got {media_type!r}")
         if not response.content:
             raise CaptchaError("captcha response was empty")
@@ -258,8 +260,29 @@ class _BaseGSTClient:
         return tuple(FilingPreference.from_payload(entry) for entry in _entries(rows))
 
 
+# The portal sits behind a web application firewall that answers a blocked
+# client with an HTML page and HTTP 200, not a 403. Without recognising it, a
+# block surfaces as "expected an image, got 'text/html'" or as a JSON decode
+# error, and sends the reader looking for a bug in their own code.
+_BLOCKED_MARKERS: Final = ("Request Rejected", "requested URL was rejected")
+
+
+def _blocked(text: str) -> bool:
+    """Whether a body is the firewall's block page rather than a real answer."""
+    head = text[:600]
+    return any(marker in head for marker in _BLOCKED_MARKERS)
+
+
+_BLOCKED_MESSAGE: Final = (
+    "the portal's firewall rejected this client, which it does after a burst "
+    "of requests from one address; it clears on its own, so wait and retry"
+)
+
+
 def _json_object(response: httpx.Response) -> dict[str, Any]:
     """Decode a JSON object body, or raise :class:`TaxpayerLookupError`."""
+    if _blocked(response.text):
+        raise TaxpayerLookupError(_BLOCKED_MESSAGE)
     try:
         body: object = response.json()
     except ValueError as error:
